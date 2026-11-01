@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { repositoryClientBuildEnvironment, resolveClientBuildEnvironment } from '../../scripts/client-build-environment.ts'
 import { packagedImportsPlugin } from './scripts/desktop-bundle-imports.mjs'
+import { DESKTOP_BRANDING } from './hub/branding.mjs'
 
 // This config runs after the workspace tsdown pass, not inside it: the main bundle inlines
 // workspace devDependencies from their lib/ output, which the concurrent workspace pass does
@@ -32,6 +33,20 @@ if (clientVersion === undefined) throw new Error('desktop build: the client envi
 /** Inline the one public build value the Node entry reads; every other variable stays a runtime lookup. */
 const clientVersionDefine = { 'process.env.DSH_CLIENT_VERSION': JSON.stringify(clientVersion) }
 
+/**
+ * Inline this build's branding from `hub/branding.mjs`, the single branding configuration, so the
+ * shell bundle carries no lookup at run time and no second copy of the values.
+ */
+const brandingDefine = {
+  DSH_HUB_BRANDING: JSON.stringify({
+    productName: DESKTOP_BRANDING.productName,
+    userDataDirectoryName: DESKTOP_BRANDING.userDataDirectoryName,
+    hubOrigin: DESKTOP_BRANDING.hubOrigin,
+    iconPng: DESKTOP_BRANDING.iconPng,
+    telemetry: DESKTOP_BRANDING.telemetry,
+  }),
+}
+
 export default defineConfig([
   {
     entry: ['lib/types/command-manager-entry.js'],
@@ -49,7 +64,7 @@ export default defineConfig([
   {
     entry: ['lib/types/main.js'],
     plugins: [packagedImportsPlugin(mainProcessImports)],
-    define: clientVersionDefine,
+    define: { ...clientVersionDefine, ...brandingDefine },
     onSuccess: async () => {
       await build({
         configFile: false,
@@ -66,7 +81,11 @@ export default defineConfig([
           },
         }],
         root: fileURLToPath(new URL('.', import.meta.url)),
-        esbuild: { jsx: 'automatic' },
+        // The bundle defines NODE_ENV as production below, so the JSX transform has to be the
+        // production one too: Vite derives `jsxDev` from the ambient NODE_ENV alone, and a
+        // development transform emits `jsxDEV` calls against the production React runtime, which
+        // leaves the welcome window blank.
+        esbuild: { jsx: 'automatic', jsxDev: false },
         define: { 'process.env.NODE_ENV': JSON.stringify('production') },
         build: {
           outDir: 'lib/welcome',
@@ -94,6 +113,7 @@ export default defineConfig([
     // Sandboxed Electron preloads run as CommonJS even though the application package is ESM.
     entry: { [name]: `lib/types/${name}.js` },
     plugins: [packagedImportsPlugin(preloadImports)],
+    define: brandingDefine,
     outDir: 'lib',
     format: 'cjs' as const,
     codeSplitting: false,

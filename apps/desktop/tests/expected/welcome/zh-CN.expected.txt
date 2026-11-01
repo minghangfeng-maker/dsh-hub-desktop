@@ -1,6 +1,8 @@
 DeepSeek Harness
 DeepSeek Harness
 欢迎使用 DeepSeek Harness
-组装无限可能，共探智能上限
-登录
+账号、模型与插件，一次登录即可用
+离线使用
+登录 DSH Hub
 添加 API Key
+Powered by xdedmi

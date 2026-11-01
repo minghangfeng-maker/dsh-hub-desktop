@@ -1,6 +1,8 @@
 DeepSeek Harness
 DeepSeek Harness
 Welcome to DeepSeek Harness
-Build potential. Explore intelligence.
-Sign in
+Your team’s account, models, and plugins, one sign-in away.
+Continue offline
+Log in to DSH Hub
 Add API Key
+Powered by xdedmi

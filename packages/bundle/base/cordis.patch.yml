@@ -255,6 +255,12 @@
     - id: pwsh-sandbox
       name: '@deepseek-ai/dsh-pwsh-sandbox'
       disabled: !!js process.platform !== 'win32'
+      config:
+        # Hub build: the desktop shell points this at the PowerShell the installer carries,
+        # resolved from its own install directory at run time. An unset value (a plain CLI
+        # profile, or a bundle that failed its self-check) keeps the upstream probe chain,
+        # which ends at Windows PowerShell 5.1.
+        pwshPath: !!js process.env.DSH_PWSH_PATH
 
     - id: approval
       name: '@deepseek-ai/dsh-user-approval'

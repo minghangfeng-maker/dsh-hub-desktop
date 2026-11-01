@@ -11,13 +11,20 @@ import type { WelcomeSaveResult, WelcomeNotice } from '../src/welcome-api.ts'
 const html = readFileSync(join(import.meta.dirname, '../renderer/welcome.html'), 'utf8')
 afterEach(cleanup)
 
-function mount(language = 'zh-CN', takeNotice = vi.fn<() => Promise<WelcomeNotice | undefined>>().mockResolvedValue(undefined)) {
+function mount(
+  language = 'zh-CN',
+  takeNotice = vi.fn<() => Promise<WelcomeNotice | undefined>>().mockResolvedValue(undefined),
+  allowApiKey = true,
+) {
   cleanup()
   const stopAccount = vi.fn()
   const api = {
     takeNotice,
     analytics: vi.fn(async (_event: string, _attributes: object) => {}),
     analyticsEnabled: async () => true,
+    // The official provider's key entry is an advanced alternative: these cases exercise
+    // it enabled, and one case below asserts the default Hub-only gate.
+    allowApiKey,
     onAccountState: vi.fn((_listener: (state: AccountView) => void) => stopAccount),
     startSignIn: vi.fn(async (): Promise<AccountView> => ({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null })),
     cancelSignIn: vi.fn(async (): Promise<AccountView> => ({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null })),
@@ -25,6 +32,7 @@ function mount(language = 'zh-CN', takeNotice = vi.fn<() => Promise<WelcomeNotic
     ...resolveDesktopLocale(language),
     saveApiKey: vi.fn<(value: string) => Promise<WelcomeSaveResult>>().mockResolvedValue({ ok: true }),
     skip: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    enterOffline: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
   }
   const mounted = render(<Welcome api={api} />)
   const input = document.querySelector('input')!
@@ -41,6 +49,7 @@ function mount(language = 'zh-CN', takeNotice = vi.fn<() => Promise<WelcomeNotic
       ...heading === 'key-title' ? [document.querySelector('#key-description')!.textContent, `${input.placeholder} [password]`] : [],
       ...[...document.querySelectorAll('button')].filter(item => item.closest('[hidden]') === null)
         .map(item => `${item.textContent || item.getAttribute('aria-label')}${item.disabled ? ' [disabled]' : ''}`),
+      document.querySelector('#powered-by')?.textContent ?? '',
       '',
     ].join('\n')
   }
@@ -48,6 +57,45 @@ function mount(language = 'zh-CN', takeNotice = vi.fn<() => Promise<WelcomeNotic
 }
 
 describe('desktop welcome presentation', () => {
+  it('offers only the Hub sign-in until the advanced switch enables the key entry', async () => {
+    const view = mount('zh-CN', undefined, false)
+    expect(document.querySelector('#sign-in')?.textContent).toBe('登录 DSH Hub')
+    expect(document.querySelector('#api-key')).toBeNull()
+    // The product name in this fixture is the unbranded default (branding is inlined
+    // only by the bundle), so the account copy is asserted at the dictionary level.
+    expect(view.copy()).toContain('登录 DSH Hub')
+    // The vendor line is part of the login page, in every language (design §4.1).
+    expect(document.querySelector('#powered-by')?.textContent).toBe('Powered by xdedmi')
+  })
+
+  it.each(['zh-CN', 'en'])('offers an offline entry that enters the workspace without signing in (%s)', async (language) => {
+    const view = mount(language)
+    const offline = Promise.withResolvers<undefined>()
+    view.api.enterOffline.mockReturnValue(offline.promise)
+    const entry = view.button('#offline')
+    expect(entry.textContent).toBe(view.api.messages.welcomeOffline)
+    expect(view.document.querySelector('#offline-hint')!.textContent).toBe(view.api.messages.welcomeOfflineHint)
+    fireEvent.click(entry)
+    expect(view.api.enterOffline).toHaveBeenCalledOnce()
+    expect(entry.disabled).toBe(true)
+    offline.resolve(undefined)
+    await vi.waitFor(() => { expect(entry.disabled).toBe(false) })
+  })
+
+  it('reports a failed offline entry on the entry page and keeps it retryable', async () => {
+    const view = mount()
+    view.api.enterOffline.mockRejectedValue(new Error('workspace refused'))
+    fireEvent.click(view.button('#offline'))
+    await vi.waitFor(() => {
+      expect(view.document.querySelector('#offline-hint')!.textContent).toBe(view.api.messages.welcomeContinueFailed)
+    })
+    expect(view.document.querySelector('#offline-hint')!.getAttribute('role')).toBe('alert')
+    expect(view.button('#offline').disabled).toBe(false)
+    view.api.enterOffline.mockResolvedValue(undefined)
+    fireEvent.click(view.button('#offline'))
+    await vi.waitFor(() => { expect(view.api.enterOffline).toHaveBeenCalledTimes(2) })
+  })
+
   it.each(['zh-CN', 'en'])('renders the %s entry and API-key step', async (language) => {
     const view = mount(language)
     expect(view.document.documentElement.lang).toBe(language)

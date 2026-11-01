@@ -18,6 +18,7 @@ Var InstallerEditFrame
 Var InstallerBrowse
 Var InstallerLaunch
 Var InstallerExpanded
+Var InstallerVendor
 !include "${__FILEDIR__}\path.nsh"
 !include "${__FILEDIR__}\drawing.nsh"
 
@@ -163,6 +164,15 @@ Function InstallerCreate
     SendMessage $InstallerButton ${WM_SETFONT} $InstallerFont 1
     ${NSD_OnClick} $InstallerButton InstallerStart
     ${NSD_OnNotify} $InstallerButton InstallerPaintButton
+
+    ; Vendor line under the action area; it stays visible on the welcome, progress,
+    ; and finish states because the installer draws them on this one dialog.
+    ${NSD_CreateLabel} 0 0 0 0 "$(INSTALLER_VENDOR)"
+    Pop $InstallerVendor
+    !insertmacro InstallerPlace $InstallerVendor 48 556 504 20
+    ${NSD_AddStyle} $InstallerVendor ${SS_CENTER}|${SS_CENTERIMAGE}
+    SendMessage $InstallerVendor ${WM_SETFONT} $InstallerSmallFont 1
+    !insertmacro InstallerSecondaryColors $InstallerVendor
     Call InstallerRender
     System::Call 'user32::SetPropW(p $HWNDPARENT, w "HarnessInstaller.Ready", p 1)'
     ShowWindow $InstallerDialog 5

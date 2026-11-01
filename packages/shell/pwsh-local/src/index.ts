@@ -39,11 +39,14 @@ export const ENV_OVERRIDES = {
 
 /**
  * UTF-8 output pinning prepended to every command. The subprocess collector
- * decodes output bytes as UTF-8, but Windows PowerShell 5.1 (the last-resort
- * executable fallback) writes the console/OEM code page by default, which
- * garbles non-ASCII output; pwsh 7 defaults to UTF-8 and is unaffected. The
- * statements ride on line 1 after `; ` separators so PowerShell error line
- * numbers stay accurate.
+ * decodes output bytes as UTF-8, but a Windows console started in a non-UTF-8
+ * code page makes both engines write that code page: Windows PowerShell 5.1
+ * always does, and PowerShell 7 does too until this preamble runs, because
+ * `[Console]::OutputEncoding` begins at the console code page even though
+ * `$OutputEncoding` already defaults to UTF-8 there. Measured on PowerShell
+ * 7.6.7 in a 936 console: without the preamble `中文` leaves as the same GBK
+ * bytes (`d6d0 cec4`) 5.1 writes. The statements ride on line 1 after `; `
+ * separators so PowerShell error line numbers stay accurate.
  */
 export const ENCODING_PREAMBLE =
   '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [System.Text.UTF8Encoding]::new($false); '

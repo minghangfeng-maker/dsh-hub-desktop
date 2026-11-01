@@ -3,4 +3,5 @@ DeepSeek Harness
 Sign in timed out
 Sign in again
 Add API Key
+Powered by xdedmi
 Sign in again to continue

@@ -11,6 +11,8 @@ import { AccountAvatar } from './AccountAvatar.tsx'
 import type { AccountAvatarSnapshot } from './account-avatar.ts'
 import { authorizeUrlWithTheme } from './authorize-url.ts'
 import type { BonusNotice } from './bonus-notices.ts'
+import type { HubChannelPhase, HubChannelSnapshot } from './hub-channel.ts'
+import type { AccountKey } from './locales.ts'
 import css from './AccountSection.module.css'
 
 /** Safe account snapshot shared by the settings page and launcher. */
@@ -36,6 +38,10 @@ export interface AccountSnapshot {
    * True on Desktop until shell.overlay reports visibility, false in browsers; Desktop layouts must render that slot.
    */
   desktopOnboardingVisible?: boolean
+  /** A Hub manifest needs a restart this run has not performed; Desktop only. */
+  hubRestartPending?: boolean
+  /** Phone-access switch and connection state; absent on a build with no Hub connector. */
+  hubChannel?: HubChannelSnapshot | undefined
 }
 
 /** Host operations injected into the Cordis-free account component. */
@@ -85,13 +91,43 @@ export interface AccountSectionInjected {
   hasRunningAccountTasks: () => Promise<boolean>
   /** @returns after local account credentials are removed. */
   signOut: () => Promise<void>
+  /** Ask the desktop shell for the pending restart it owns; Desktop only. */
+  restartHub: () => Promise<void>
+  /**
+   * Turn phone access on or off on this computer; absent when the build has no channel.
+   * @param enabled - requested switch position.
+   * @returns after the Host answered with the new status.
+   */
+  setHubChannel?: (enabled: boolean) => Promise<void>
 }
+/**
+ * Copy for the phone channel's phase.
+ * @param phase - phase the Host reported.
+ * @param enabled - whether the local switch is on.
+ * @returns dictionary key for the row's status text.
+ */
+function channelPhaseCopy(phase: HubChannelPhase, enabled: boolean): AccountKey {
+  if (phase === 'online') return 'remoteAccessOnline'
+  if (phase === 'connecting') return 'remoteAccessConnecting'
+  if (phase === 'retry') return 'remoteAccessRetry'
+  if (phase === 'failed') return 'remoteAccessFailed'
+  if (phase === 'waiting-sign-in') return 'remoteAccessWaiting'
+  // `off` with the switch on means the connection has not started yet, which the
+  // waiting copy describes better than "off".
+  return enabled ? 'remoteAccessWaiting' : 'remoteAccessOff'
+}
+
 /** Composed account section props. */
 export type AccountSectionProps =
   PropsRuntime<'settings.section'> & PropsLocale<'settings.account'> & InjectFace<AccountSectionInjected>
 /** @param props - localized actions, account subscription, and the shared Platform page channel. @returns account settings UI. */
-export function AccountSection({ t, useAccount, useTheme, start, cancel, openPlatformPage, avatarFailed }: AccountSectionProps) {
+export function AccountSection({
+  t, useAccount, useTheme, start, cancel, openPlatformPage, avatarFailed, restartHub, setHubChannel,
+}: AccountSectionProps) {
   const { view: state, details, avatar, failed: streamFailed } = useAccount(value => value)
+  const hubRestartPending = useAccount(value => value.hubRestartPending === true)
+  const hubChannel = useAccount(value => value.hubChannel)
+  const [channelConsent, setChannelConsent] = useState(false)
   const colorScheme = useTheme(snapshot => snapshot.active.colorScheme)
   // The shared host owns the native view; this page holds only its own request,
   // and only while it is the latest owner.
@@ -158,6 +194,7 @@ export function AccountSection({ t, useAccount, useTheme, start, cancel, openPla
         <Button variant="primary" className={css.signInButton} disabled={busy || state === undefined}
           onClick={() => { void run(start) }}>{t('signIn')}</Button>
       </div>
+      <p className={css.poweredBy}>{t('poweredBy')}</p>
     </section>
   )
   return (
@@ -210,6 +247,19 @@ export function AccountSection({ t, useAccount, useTheme, start, cancel, openPla
             </span>
           </div>
         </>}
+        {hubChannel !== undefined && setHubChannel !== undefined && <>
+          <div className={css.divider} />
+          <div className={css.row}>
+            <span>{t('remoteAccessTitle')}</span>
+            <div className={css.links}>
+              <span className={css.secondary} role="status">{t(channelPhaseCopy(hubChannel.phase, hubChannel.enabled))}</span>
+              <Button variant="outline" disabled={busy} onClick={() => {
+                if (hubChannel.enabled) void run(async () => { await setHubChannel(false) })
+                else setChannelConsent(true)
+              }}>{t(hubChannel.enabled ? 'remoteAccessTurnOff' : 'remoteAccessTurnOn')}</Button>
+            </div>
+          </div>
+        </>}
         <div className={css.divider} />
         <div className={css.row}>
           <span className={css.secondary}>{t('more')}</span>
@@ -221,6 +271,21 @@ export function AccountSection({ t, useAccount, useTheme, start, cancel, openPla
           </div>
         </div>
       </div>
+      {channelConsent && setHubChannel !== undefined && <div className={css.restartCard} role="group" aria-label={t('remoteAccessConfirmTitle')}>
+        <span className={css.restartCopy}>{t('remoteAccessConfirmTitle')} {t('remoteAccessConfirmBody')}</span>
+        <div className={css.links}>
+          <Button variant="outline" disabled={busy} onClick={() => { setChannelConsent(false) }}>{t('cancel')}</Button>
+          <Button variant="primary" disabled={busy} onClick={() => {
+            setChannelConsent(false)
+            void run(async () => { await setHubChannel(true) })
+          }}>{t('remoteAccessTurnOn')}</Button>
+        </div>
+      </div>}
+      {hubRestartPending && <div className={css.restartCard} role="status">
+        <span className={css.restartCopy}>{t('hubRestartPending')}</span>
+        <Button variant="outline" disabled={busy} onClick={() => { void run(restartHub) }}>{t('hubRestartNow')}</Button>
+      </div>}
+      <p className={css.poweredBy}>{t('poweredBy')}</p>
     </section>
   )
 }

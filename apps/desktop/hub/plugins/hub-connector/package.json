@@ -1,0 +1,36 @@
+{
+  "name": "@dsh-hub/hub-connector",
+  "version": "0.2.3",
+  "private": true,
+  "description": "DSH Hub connector: Hub account provider, device identity and reporting, the installer bundled plugin baseline, the bundled model snapshot, manifest application, the hubAgentModes service, and the local phone-access switch",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./manifest.schema.json": "./manifest.schema.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "manifest.schema.json",
+    "build-info.json",
+    "cordis.patch.yml",
+    "README.md",
+    "vendor/SHA256SUMS",
+    "vendor/README.md"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@dsh-hub/dsh-node-remote": "0.2.2",
+    "ws": "^8.21.3"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "bundleDependencies": [
+    "@dsh-hub/dsh-node-remote",
+    "ws"
+  ]
+}

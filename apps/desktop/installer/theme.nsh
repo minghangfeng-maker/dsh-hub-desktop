@@ -48,6 +48,15 @@ Var InstallerBorder
     ${EndIf}
 !macroend
 
+; Secondary copy (the vendor line) keeps the window tint behind it.
+!macro InstallerSecondaryColors HANDLE
+    ${If} $InstallerTheme == "dark"
+        SetCtlColors ${HANDLE} ADB2B8 151517
+    ${Else}
+        SetCtlColors ${HANDLE} 6B6F73 FFFFFF
+    ${EndIf}
+!macroend
+
 Function InstallerResolveTheme
     ${If} $InstallerTheme == "auto"
         ClearErrors

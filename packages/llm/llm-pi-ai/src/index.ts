@@ -72,6 +72,8 @@ import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { discoverModels } from './discovery.ts'
 import type { StoredModelDiscoveryProfile } from './discovery.ts'
 import { registerPiAiFlows } from './login.ts'
+import { PiAiManagedProviderRegistry } from './managed.ts'
+import type { ManagedProvidersSnapshot } from './managed.ts'
 import { providerDefaultsOf } from './provider-data.ts'
 
 export { PiAiAdapter } from './adapter.ts'
@@ -89,7 +91,20 @@ export type {
   ResolvedPiAiProviderProfile,
 } from './config.ts'
 export { recordKeyFor } from './auth.ts'
+export { PiAiManagedProviderRegistry } from './managed.ts'
+export type { ManagedProvidersSnapshot, PiAiManagedProviderSlot, PiAiManagedProviders } from './managed.ts'
 export { supportedProtocols } from './provider.ts'
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /**
+     * Provider routes another plugin owns on this adapter's behalf, so Hub-managed
+     * model routes and the user's own routes serve side by side without the Hub
+     * owning the user's configuration section.
+     */
+    llmPiAiManaged: import('./managed.ts').PiAiManagedProviders
+  }
+}
 
 export const name = 'llm-pi-ai'
 export const inject = ['llm']
@@ -128,6 +143,7 @@ function registrationFacts(profiles: ReadonlyMap<string, ResolvedPiAiProviderPro
 function directoryEntries(
   profiles: ReadonlyMap<string, ResolvedPiAiProviderProfile>,
   settingsNs: string,
+  managedRoutes: ReadonlySet<string>,
 ): LlmConfigurableProvider[] {
   const entries = new Map<string, LlmConfigurableProvider>()
   const declare = (provider: string, displayName: string, error?: string): void => {
@@ -141,6 +157,7 @@ function directoryEntries(
       // narrowing a shipped provider's models stores a profile too, and that
       // route is still one pi-ai knows.
       declared: installed === undefined,
+      ...managedRoutes.has(provider) ? { managed: true } : {},
       ...installed === undefined ? {} : providerDefaultsOf(installed),
       ...error === undefined ? {} : { error },
     })
@@ -154,12 +171,25 @@ function directoryEntries(
 export function apply(ctx: Context, config: Config): void {
   ctx.inject(['settings'], (child) => { child.effect(() => child.settings.configure({ auto: false }, ctx.fiber)) })
   const settingsNs = ctx.fiber.entry?.options.id ?? NS
+  /** Routes the user's own configuration section declares, as the registry sees them. */
+  const personalRoutes = (): ReadonlySet<string> => new Set(Object.keys(config.providers.get()))
+  /**
+   * Managed routes another plugin contributes (the desktop Hub). Every change is
+   * applied through {@link applyProspective}, which registers the merged route set
+   * and directory entries as one transaction, so a candidate the live registry
+   * cannot serve leaves the previous sets serving.
+   */
+  const managed = new PiAiManagedProviderRegistry(
+    personalRoutes,
+    (snapshot, options) => { applyProspective(snapshot, options) },
+  )
   let lastRaw: ReturnType<Config['providers']['get']> | undefined
+  let lastManagedRevision = -1
   let memoized: ReadonlyMap<string, ResolvedPiAiProviderProfile> | undefined
   /**
-   * The resolved profiles for the current configuration, memoized by the raw
-   * snapshot's identity — which is also what makes the adapter's own snapshot
-   * stable across operations that observe no change.
+   * The resolved profiles for the current configuration and managed set, memoized
+   * by both snapshots' identities — which is also what makes the adapter's own
+   * snapshot stable across operations that observe no change.
    *
    * Catalog diagnostics stay in the snapshot beside serviceable models, so
    * stored configuration remains visible after an installed catalog changes.
@@ -167,9 +197,14 @@ export function apply(ctx: Context, config: Config): void {
    */
   const profiles = (): ReadonlyMap<string, ResolvedPiAiProviderProfile> => {
     const raw = config.providers.get()
-    if (raw === lastRaw && memoized !== undefined) return memoized
-    const next = resolveProfiles(structuredClone(raw) as import('./config.ts').Options['providers'], 'deferred')
+    const contributed = managed.snapshot()
+    if (raw === lastRaw && contributed.revision === lastManagedRevision && memoized !== undefined) return memoized
+    // Conflict rules keep the two sets disjoint, so a managed route never shadows
+    // one the user owns; the merge is only how both reach one registration.
+    const merged = { ...structuredClone(raw) as import('./config.ts').Options['providers'], ...contributed.providers }
+    const next = resolveProfiles(merged, 'deferred')
     lastRaw = raw
+    lastManagedRevision = contributed.revision
     memoized = next
     return next
   }
@@ -182,6 +217,17 @@ export function apply(ctx: Context, config: Config): void {
       { providers: structuredClone(candidate.providers.get()) } as import('./config.ts').Options,
       { providers: structuredClone(config.providers.get()) } as import('./config.ts').Options,
     )
+    // A personal route may not take over a route the Hub already serves: the
+    // user's request must never be answered by the Hub after a silent swap.
+    const managedRoutes = managed.snapshot().routes
+    for (const [route, profile] of Object.entries(candidate.providers.get())) {
+      if (!managedRoutes.has(route)) continue
+      if (deepEqualJson(profile, config.providers.get()[route])) continue
+      throw new Error(
+        `llm-pi-ai: provider route "${route}" is managed by another source (the Hub);`
+        + ' choose a different route key for this provider',
+      )
+    }
     return raw
   })
 
@@ -243,8 +289,10 @@ export function apply(ctx: Context, config: Config): void {
   // profiles appear, and leave with them.
   let directory: DirectoryRegistrationHandle | undefined
   let directoryFacts: unknown
+  /** Provider keys the directory registration currently holds. */
+  let directoryProviders: ReadonlySet<string> = new Set()
   const ensureDirectory = (): void => {
-    const entries = directoryEntries(profiles(), settingsNs)
+    const entries = directoryEntries(profiles(), settingsNs, managed.snapshot().routes)
     if (deepEqualJson(entries, directoryFacts)) return
     // Atomic replace, never dispose-then-register: a route another adapter
     // family already declares (a profile keyed `deepseek-official`) would
@@ -257,6 +305,7 @@ export function apply(ctx: Context, config: Config): void {
       directory.replace(entries)
     }
     directoryFacts = entries
+    directoryProviders = new Set(entries.map(entry => entry.provider))
   }
   ensureDirectory()
   /** Host-owned request inputs for discovery of one configured route. */
@@ -287,6 +336,8 @@ export function apply(ctx: Context, config: Config): void {
   // settings section supplies profiles, and routes drop when it empties.
   let registration: AdapterRegistrationHandle | undefined
   let registeredFacts: unknown
+  /** Route keys the adapter registration currently holds. */
+  let registeredRoutes: string[] = []
   const ensureRegistrationFacts = (): void => {
     const facts = registrationFacts(profiles())
     if (deepEqualJson(facts, registeredFacts)) return
@@ -302,6 +353,7 @@ export function apply(ctx: Context, config: Config): void {
       // profiles, and an empty section keeps it that way.
       if (routes.length === 0) {
         registeredFacts = facts
+        registeredRoutes = routes
         return
       }
       registration = ctx.llm.registerAdapter(routes, adapter)
@@ -309,14 +361,96 @@ export function apply(ctx: Context, config: Config): void {
       registration.replace(routes)
     }
     registeredFacts = facts
+    registeredRoutes = routes
   }
   ensureRegistrationFacts()
 
-  ctx.on('loader/volatile-update', () => {
+  /**
+   * Register one prospective managed snapshot as a single transaction.
+   *
+   * Every route the snapshot adds must be servable by this adapter and free of
+   * other adapters' registrations; every provider it adds to the directory must
+   * be free of other plugins' declarations. The merged route set is registered
+   * first and the directory second, so a directory refusal restores the previous
+   * routes. The registry calls this with the previous snapshot when a commit
+   * fails, which makes the rollback observable in the live registries.
+   * @param snapshot - The managed sets a commit would publish.
+   * @throws {Error} When a route or directory entry cannot be registered.
+   */
+  function applyProspective(
+    snapshot: ManagedProvidersSnapshot,
+    options: { readonly restoring: boolean },
+  ): void {
+    const personal = structuredClone(config.providers.get()) as import('./config.ts').Options['providers']
+    // Conflict rules keep the two sets disjoint, so a managed route never shadows
+    // one the user owns; the merge is only how both reach one registration.
+    const next = resolveProfiles({ ...personal, ...snapshot.providers }, 'deferred')
+    const routes = [...next.keys()]
+    const entries = directoryEntries(next, settingsNs, snapshot.routes)
+    // A rollback re-registers the last good routes, which the failed attempt may
+    // have replaced; treating them as foreign would refuse the restore itself.
+    if (!options.restoring) {
+      const ownRoutes = new Set(registeredRoutes)
+      for (const provider of ctx.llm.listProviders()) {
+        if (!routes.includes(provider.id) || ownRoutes.has(provider.id)) continue
+        throw new Error(
+          `llm-pi-ai: model route "${provider.id}" from the managed set is already served by another adapter;`
+          + ' the provider change is refused and the previous routes stay in service',
+        )
+      }
+      const ownDirectory = new Set(directoryProviders)
+      for (const entry of ctx.llm.listConfigurableProviders()) {
+        if (!snapshot.routes.has(entry.provider) || ownDirectory.has(entry.provider)) continue
+        throw new Error(
+          `llm-pi-ai: provider "${entry.provider}" from the managed set is already declared by another plugin`
+          + ` (settings namespace "${entry.settingsNs}"); the provider change is refused and the previous routes stay in service`,
+        )
+      }
+    }
+    const previousRoutes = [...registeredRoutes]
+    const previousFacts = registeredFacts
+    const facts = registrationFacts(next)
+    // The registry captures each route's display name and retry policy at
+    // registration, so a same-route change to either must re-register; comparing
+    // only the route array would leave the selectors and retry behavior stale.
+    const reRegister = !deepEqualJson(routes, previousRoutes) || !deepEqualJson(facts, previousFacts)
+    if (reRegister) {
+      if (registration === undefined) {
+        if (routes.length > 0) registration = ctx.llm.registerAdapter(routes, adapter)
+      } else {
+        registration.replace(routes)
+      }
+      registeredRoutes = routes
+      registeredFacts = facts
+    }
+    try {
+      if (deepEqualJson(entries, directoryFacts)) return
+      if (directory === undefined) directory = ctx.llm.registerConfigurableProviders(entries)
+      else directory.replace(entries)
+      directoryFacts = entries
+      directoryProviders = new Set(entries.map(entry => entry.provider))
+    } catch (error) {
+      // No local rollback: the registry clears its candidate and calls this
+      // function with the previous snapshot, which re-registers the old routes and
+      // therefore captures the old facts. Restoring here would read the candidate
+      // configuration and leave the adapter serving the refused display name and
+      // retry policy after the failure.
+      throw new Error(
+        'the managed provider directory entry could not be registered: '
+        + (error instanceof Error ? error.message : String(error)),
+      )
+    }
+  }
+
+  const refresh = (): void => {
     try { ensureRegistrationFacts(); ensureDirectory() }
     catch (error) {
       ctx.logger.error('llm-pi-ai: configuration conflicts with an existing provider route')
       ctx.logger.error(error)
     }
-  })
+  }
+  ctx.on('loader/volatile-update', refresh)
+  // Offered last: a dependent's `contribute()` runs the registration transaction
+  // above, which needs this plugin's own routes and directory already in place.
+  ctx.effect(() => ctx.provide('llmPiAiManaged', managed), 'llm-pi-ai: managed provider routes')
 }

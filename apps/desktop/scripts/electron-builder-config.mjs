@@ -19,7 +19,7 @@ import {
   resolveWindowsUpdatePublisher,
   scrubWindowsSigningEnvironment,
 } from './windows-sign.mjs'
-import { resolveDesktopAutoUpdateConfig } from './desktop-auto-update-environment.mjs'
+import { resolveDesktopAutoUpdateConfig, resolveDesktopAutoUpdateTarget, resolveDesktopUpdateChannel } from './desktop-auto-update-environment.mjs'
 import { resolveDesktopBuildCommit } from './desktop-build-commit.mjs'
 import { resolveDesktopBuildVersion } from './desktop-build-version.mjs'
 import { resolveDesktopPolicyEnvironment } from './desktop-policy-environment.mjs'
@@ -28,11 +28,9 @@ import { installWindowsDirectoryInstaller } from './windows-directory-installer.
 import { preserveWindowsRuntimeSignature, signWindowsCode } from './windows-runtime-signature.mjs'
 import { prepareWindowsAsarUnpack, verifyWindowsAsarUnpack } from './windows-asar-unpack.mjs'
 import { recordPackagingEvent } from './packaging-run.mjs'
-import {
-  resolveMacOSAppUpdateFeed,
-  verifyMacOSAppUpdateConfig,
-  writeMacOSAppUpdateConfig,
-} from './macos-app-update-config.mjs'
+import { resolveMacOSAppUpdateFeed, verifyMacOSAppUpdateConfig, writeMacOSAppUpdateConfig } from './macos-app-update-config.mjs'
+import { DESKTOP_BRANDING, brandedAssetPath, brandedHubOrigin, hubFeedUrl, hubPolicy } from '../hub/branding.mjs'
+import { INSTALLER_UI_ENV, installUninstallerExtraction, installerUiDirectory, verifyInstallerUi } from '../hub/nsis-cross-package.mjs'
 
 /**
  * Create electron-builder configuration from one release environment.
@@ -65,13 +63,28 @@ export function createElectronBuilderConfig(
   if (skipNotarization && (unsigned || resolvedPlatform !== 'darwin')) throw new Error('Skipping notarization requires a signed macOS build')
   const packagesMacOS = targetPlatform === 'darwin' || (targetPlatform === undefined && hostPlatform === 'darwin')
   const packagesWindows = resolvedPlatform === 'win32'
-  const policy = packagesMacOS && unsigned ? undefined : resolveDesktopPolicyEnvironment(env)
+  const hubOrigin = brandedHubOrigin(env)
+  // Hub build: branding decides whether this product embeds a mandatory-update origin at all.
+  // `hub` points the policy at the Hub; `upstream` keeps the official deployment untouched.
+  const policy = packagesMacOS && unsigned ? undefined
+    : DESKTOP_BRANDING.mandatoryUpdatePolicy === 'off' ? undefined
+      : DESKTOP_BRANDING.mandatoryUpdatePolicy === 'hub' ? hubPolicy(hubOrigin)
+        : resolveDesktopPolicyEnvironment(env)
   if (resolvedPlatform === 'win32') installWindowsDirectoryInstaller()
   const macOSSigning = packagesMacOS && !unsigned ? resolveMacOSSigningEnvironment(env) : undefined
   if (packagesMacOS && !unsigned && !skipNotarization) resolveMacOSNotarizationEnvironment(env)
   const buildPaths = desktopTargetBuildPaths(resolveDesktopBuildTarget(env, hostPlatform, hostArch))
   const output = desktopArtifactOutput(buildPaths, { unsigned, skipNotarization })
+  // Hub build: `hub-build.sh --installer` compiles the NSIS interface on the Windows host first and
+  // sets DSH_HUB_INSTALLER_UI=1. This run then embeds those assets, the Windows 7-Zip extractor, and
+  // an uninstaller read out of its generation installer instead of running Wine.
+  const crossInstaller = packagesWindows && process.platform !== 'win32' && env[INSTALLER_UI_ENV] === '1'
+  if (crossInstaller) {
+    verifyInstallerUi(installerUiDirectory(buildPaths.root))
+    installUninstallerExtraction()
+  }
   let primaryRuntimeDestination
+  let pwshDestination
   let dshDestination
   let windowsCode = []
   const unpack = ['**/*.{node,dylib,dll,so,exe}', '**/*.so.*', '**/spawn-helper', '**/@vscode/ripgrep-*/bin/rg',
@@ -83,7 +96,12 @@ export function createElectronBuilderConfig(
         tokenPin: env.DSH_DESKTOP_WINDOWS_TOKEN_PIN,
         keyContainer: env.DSH_DESKTOP_WINDOWS_KEY_CONTAINER,
         preserveSignature: async path => {
-          for (const [sourceRoot, destinationRoot] of [[join(buildPaths.runtime, 'primary-runtime'), primaryRuntimeDestination], [buildPaths.dsh, dshDestination]]) {
+          // The bundled PowerShell tree is Microsoft-signed and must keep those signatures.
+          for (const [sourceRoot, destinationRoot] of [
+            [join(buildPaths.runtime, 'primary-runtime'), primaryRuntimeDestination],
+            [join(buildPaths.runtime, 'pwsh'), pwshDestination],
+            [buildPaths.dsh, dshDestination],
+          ]) {
             if (destinationRoot !== undefined && await preserveWindowsRuntimeSignature(path, {
               sourceRoot, destinationRoot, runDirectory: env.DSH_DESKTOP_PACKAGING_RUN_DIR,
             })) return true
@@ -95,7 +113,15 @@ export function createElectronBuilderConfig(
   if (windowsSigner !== undefined) {
     installWindowsNsisBootstrapSigner({ sign: windowsSigner })
   }
-  const update = unsigned ? undefined : resolveDesktopAutoUpdateConfig(env, resolvedPlatform, resolvedArch)
+  // Hub build: `updateFeed: 'off'` emits no publish feed, so the updater has no upstream origin.
+  // `hub` publishes a generic feed under the Hub origin; `upstream` keeps the official deployment.
+  const update = unsigned || DESKTOP_BRANDING.updateFeed === 'off' ? undefined
+    : DESKTOP_BRANDING.updateFeed === 'hub' ? {
+      channel: resolveDesktopUpdateChannel(env),
+      origin: hubOrigin,
+      publicUrl: hubFeedUrl(hubOrigin, resolveDesktopAutoUpdateTarget(resolvedPlatform, resolvedArch)),
+    }
+    : resolveDesktopAutoUpdateConfig(env, resolvedPlatform, resolvedArch)
   if (preparedRuntime !== undefined) buildPaths.dsh = preparedRuntime
   // electron-builder merges extraMetadata into the packaged manifest, so a build version here reaches
   // the artifact names, the update feed, and the installed app.getVersion() the updater compares against.
@@ -105,15 +131,23 @@ export function createElectronBuilderConfig(
   const packaged = resolveDesktopBuildCommit(env)
   return {
     appId,
-    protocols: [{ name: 'DeepSeek Harness', schemes: ['dsh'] }],
+    protocols: [{ name: DESKTOP_BRANDING.protocolName, schemes: ['dsh'] }],
+    // Installer, executable, and bundle copyright; the hub build names its own company.
+    copyright: DESKTOP_BRANDING.copyright,
     extraMetadata: {
+      // productName also decides Electron's app.name and therefore the userData directory.
+      productName: DESKTOP_BRANDING.productName,
+      // electron-builder reads the Windows version-resource CompanyName (and the NSIS
+      // publisher line) from the manifest author, which the upstream manifest omits.
+      author: { name: DESKTOP_BRANDING.companyName },
+      copyright: DESKTOP_BRANDING.copyright,
       dshDesktopAppId: appId,
       dshDesktopUpdateChannel: update?.channel ?? 'nightly',
       ...(policy === undefined ? {} : { dshMandatoryUpdatePolicy: policy }),
       ...buildVersion === productVersion ? {} : { version: buildVersion },
       ...packaged === undefined ? {} : { dshBuildCommit: packaged.commit, dshBuildDirty: packaged.dirty },
     },
-    productName: 'DeepSeek Harness',
+    productName: DESKTOP_BRANDING.productName,
     // Unsigned builds carry their own suffix so a shared file can never pass for a release artifact.
     artifactName: `deepseek-harness-\${version}-\${os}-\${arch}${output.suffix}.\${ext}`,
     directories: { output: output.directory },
@@ -121,14 +155,16 @@ export function createElectronBuilderConfig(
     electronDist: buildPaths.electron,
     electronFuses: { runAsNode: true },
     beforeBuild: async () => {
-      if (resolvedPlatform !== 'win32') return true
+      // Hub build: the NSIS interface is native code compiled by MSVC. A Windows host compiles it
+      // here, a cross installer embeds the assets verified above, and a directory build needs none.
+      if (resolvedPlatform !== 'win32' || process.platform !== 'win32' || crossInstaller) return true
       await promisify(execFile)('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
         fileURLToPath(new URL('./prepare-windows-installer.ps1', import.meta.url)),
-        '-OutputDirectory', join(buildPaths.root, 'installer-ui')], {
+        '-OutputDirectory', installerUiDirectory(buildPaths.root)], {
         env: scrubWindowsSigningEnvironment(env), windowsHide: true,
       })
       if (windowsSigner !== undefined) {
-        await windowsSigner({ path: join(buildPaths.root, 'installer-ui', 'window-frame.dll'), hash: 'sha256', isNest: false })
+        await windowsSigner({ path: join(installerUiDirectory(buildPaths.root), 'window-frame.dll'), hash: 'sha256', isNest: false })
       }
       // A falsy result tells electron-builder to omit its production node_modules collection.
       return true
@@ -152,9 +188,9 @@ export function createElectronBuilderConfig(
     asarUnpack: unpack,
     extraResources: [
       { from: buildPaths.runtime, to: 'runtime' },
-      { from: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)), to: 'icon.png' },
+      { from: brandedAssetPath(DESKTOP_BRANDING.iconPng), to: 'icon.png' },
       // Windows tray bitmaps; macOS keeps the Dock and ships no menu bar icon.
-      ...(packagesWindows ? [{ from: fileURLToPath(new URL('../resources/tray-windows.ico', import.meta.url)), to: 'tray.ico' }] : []),
+      ...(packagesWindows ? [{ from: brandedAssetPath(DESKTOP_BRANDING.trayIcon), to: 'tray.ico' }] : []),
     ],
     mac: {
       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
@@ -165,11 +201,11 @@ export function createElectronBuilderConfig(
       identity: unsigned ? '-' : macOSSigning?.signingIdentity,
       forceCodeSigning: !unsigned,
       hardenedRuntime: true,
-      extendInfo: { NSMicrophoneUsageDescription: 'DeepSeek Harness uses your microphone to transcribe speech into message drafts.' },
+      extendInfo: { NSMicrophoneUsageDescription: `${DESKTOP_BRANDING.productName} uses your microphone to transcribe speech into message drafts.` },
       entitlements: fileURLToPath(new URL('./macos-entitlements.plist', import.meta.url)),
       entitlementsInherit: fileURLToPath(new URL('./macos-entitlements.plist', import.meta.url)),
       // Prepared runtime files retain their signatures; PAK resources are sealed by their enclosing bundle.
-      signIgnore: ['/Contents/Resources/app\\.asar\\.unpacked/dsh(?:/|$)', '/Contents/Resources/runtime/primary-runtime(?:/|$)', '\\.pak$'],
+      signIgnore: ['/Contents/Resources/app\\.asar\\.unpacked/dsh(?:/|$)', '/Contents/Resources/runtime/primary-runtime(?:/|$)', '/Contents/Resources/runtime/pwsh(?:/|$)', '\\.pak$'],
       notarize: !unsigned && !skipNotarization,
       target: unsigned ? ['dmg'] : ['dmg', 'zip'],
     },
@@ -186,6 +222,7 @@ export function createElectronBuilderConfig(
       if (packagesWindows) windowsCode = await prepareWindowsAsarUnpack(context, buildPaths.dsh)
       if (windowsSigner !== undefined) {
         primaryRuntimeDestination = join(context.appOutDir, 'resources', 'runtime', 'primary-runtime')
+        pwshDestination = join(context.appOutDir, 'resources', 'runtime', 'pwsh')
         dshDestination = join(context.appOutDir, 'resources', 'app.asar.unpacked', 'dsh')
       }
       if (policy === undefined) return
@@ -236,7 +273,8 @@ export function createElectronBuilderConfig(
       )
     },
     win: {
-      icon: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)),
+      // Windows reads the per-size bitmaps of the ICO directly; a single PNG would be scaled by the shell.
+      icon: brandedAssetPath(DESKTOP_BRANDING.iconIco),
       forceCodeSigning: !unsigned,
       signtoolOptions: {
         sign: windowsSigner,
@@ -250,8 +288,11 @@ export function createElectronBuilderConfig(
       target: ['AppImage'],
     },
     nsis: {
-      installerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp'),
-      uninstallerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp'),
+      // Hub build: the Windows installer is the product users see, so it carries the product name.
+      // Unsigned builds keep their suffix so a test artifact cannot pass for a release artifact.
+      artifactName: `${DESKTOP_BRANDING.productName} Setup \${version}${output.suffix}.\${ext}`,
+      installerSidebar: join(installerUiDirectory(buildPaths.root), 'uninstaller-sidebar.bmp'),
+      uninstallerSidebar: join(installerUiDirectory(buildPaths.root), 'uninstaller-sidebar.bmp'),
       include: fileURLToPath(new URL('./installer.nsh', import.meta.url)),
       oneClick: false,
       perMachine: false,

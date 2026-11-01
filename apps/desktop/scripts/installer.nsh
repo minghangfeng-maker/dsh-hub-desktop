@@ -11,6 +11,12 @@ ManifestDPIAware true
 !macro customHeader
   !define /ifndef INSTALLER_STRINGS_FILE "${INSTALLER_SOURCE_DIR}\strings.nsh"
   !include "${INSTALLER_STRINGS_FILE}"
+  ; Vendor attribution in the installer's bottom line (design §4.1). Same text under
+  ; every installer language: it names the vendor, so NSIS language files do not
+  ; translate it. The uninstaller keeps its blank line so NSIS's own credit stays hidden.
+  !ifndef BUILD_UNINSTALLER
+    BrandingText "Powered by xdedmi"
+  !endif
   !ifdef BUILD_UNINSTALLER
     BrandingText " "
     SetFont "Segoe UI" 9

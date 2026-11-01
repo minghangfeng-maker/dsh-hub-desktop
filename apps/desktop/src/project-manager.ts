@@ -19,6 +19,10 @@ import {
   desktopCorePackageOverrides,
   verifyDesktopCorePackageSet,
 } from './core-package-set.ts'
+import { DESKTOP_BRANDING } from './branding.ts'
+import {
+  activateBundledHubPlugins, activateBundledThirdPartyPlugins, installedHubPlugins, seedHubOverlay,
+} from './hub-plugins.ts'
 import type { DesktopPaths } from './paths.ts'
 import type { DesktopRelease } from './release.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
@@ -62,23 +66,37 @@ export class DesktopProjectManager {
   /**
    * @param paths - Electron-owned package state and reserved desktop profile paths.
    * @param runtime - location of the bundled application runtime.
+   * @param runtime.hubPlugins - Bundled Hub plugin archives the installer carries, when the build ships any.
    */
   constructor(
     readonly paths: DesktopPaths,
-    readonly runtime: { readonly dsh: string },
+    readonly runtime: { readonly dsh: string; readonly hubPlugins?: string | undefined },
   ) {}
 
   /**
    * Back up the profile patch and disable third-party bundles without loading application resources.
    * The caller must stop the Host first.
+   *
+   * Bundled Hub plugins stay enabled: the connector ships with the installer, and
+   * recovery exists to undo user-installed plugins that broke startup. The Hub
+   * overlay is not a profile patch, so the sanitized profile keeps it untouched.
    * @returns Backup path after the locked profile write, or undefined if the patch was absent.
    */
   async disableAllPlugins(): Promise<string | undefined> {
-    return this.withLock(() => sanitizeProfile('dsh', this.paths.profile, WEB_PROFILE.bundles))
+    return this.withLock(() => {
+      const preserved = [...WEB_PROFILE.bundles, ...installedHubPlugins(this.paths.profile)]
+      return sanitizeProfile('dsh', this.paths.profile, preserved)
+    })
   }
 
   /**
-   * Load application metadata and prepare the external plugin profile without installing packages.
+   * Load application metadata and prepare the external plugin profile.
+   *
+   * A packaged build also activates the Hub plugins it carries and seeds the Hub
+   * overlay the Host applies as `--patch`; both are idempotent and do nothing when
+   * the installer shipped neither. A bundled plugin that declares dependencies
+   * gets one package install here, before the Host starts, so the first
+   * composition already runs it.
    */
   async applyRelease(): Promise<void> {
     await this.withLock(() => {
@@ -87,6 +105,24 @@ export class DesktopProjectManager {
       migrateProfileSettings(this.paths.profile)
       createPluginProfile(this.paths.profile)
       removeLinkProjections(this.paths.profile)
+      const activations = this.runtime.hubPlugins === undefined
+        ? []
+        : activateBundledHubPlugins({ source: this.runtime.hubPlugins, profile: this.paths.profile })
+      for (const activation of activations) {
+        console.info(`desktop hub plugin: ${activation.name}@${activation.version} ${activation.state}`)
+      }
+      // The installer's third-party plugins land before the Host composes the
+      // profile, so a first start already runs every one of them.
+      const thirdParty = this.runtime.hubPlugins === undefined
+        ? []
+        : activateBundledThirdPartyPlugins({ source: this.runtime.hubPlugins, profile: this.paths.profile })
+      for (const activation of thirdParty) {
+        console.info(`desktop hub bundled plugin: ${activation.name}@${activation.version} ${activation.state}`)
+      }
+      seedHubOverlay(this.paths.profile, {
+        connectorInstalled: installedHubPlugins(this.paths.profile).length > 0,
+        hubOrigin: DESKTOP_BRANDING.hubOrigin,
+      })
     })
   }
 

@@ -5,14 +5,24 @@ import yaml from 'js-yaml'
 import type { Context } from '@deepseek-ai/cordis'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
+import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import Timer from '@deepseek-ai/cordis-plugin-timer'
 import { initProfile, mountRootInclude, readProfilePatches, type ProfileContext } from '@deepseek-ai/dsh-app-boot'
 import Hmr from '@deepseek-ai/dsh-hmr'
 import ConfigEditor from '@deepseek-ai/dsh-config-editor'
 import Settings from '../src/index.ts'
 
-/** Attach the profile runtime to an initialized Loader with a source-module importer. */
-export async function profileComposition(ctx: Context, home: string, baseFile: string): Promise<string> {
+/**
+ * Attach the profile runtime to an initialized Loader with a source-module importer.
+ * @param ctx - Root context the composition mounts into.
+ * @param home - Temporary installation root.
+ * @param baseFile - YAML file listing the rows to mount as the profile bundle.
+ * @param overlays - Launcher patch layers applied above every file layer, as `--patch` does.
+ * @returns The profile patch path edits are persisted to.
+ */
+export async function profileComposition(
+  ctx: Context, home: string, baseFile: string, overlays: readonly PatchOptions[] = [],
+): Promise<string> {
   const dir = join(home, 'profile')
   initProfile(dir, ['test-profile-bundle'])
   const bundle = join(dir, 'node_modules', 'test-profile-bundle')
@@ -25,7 +35,7 @@ export async function profileComposition(ctx: Context, home: string, baseFile: s
   await writeFile(join(dir, 'cordis.yml'), '[]\n')
   const profile: ProfileContext = {
     name: 'test', startedBundles: ['test-profile-bundle'], dir, patchPath: join(dir, 'cordis.patch.yml'),
-    installAnchor: join(home, 'package.json'), cwd: home, home, overlays: [], telemetryDisabledEnv: undefined,
+    installAnchor: join(home, 'package.json'), cwd: home, home, overlays: [...overlays], telemetryDisabledEnv: undefined,
   }
   ctx.provide('profileContext', profile)
   ctx.provide('appReady', { onReady: (listener: () => void) => { listener(); return () => {} } })

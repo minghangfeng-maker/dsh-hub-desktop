@@ -1,0 +1,61 @@
+# The DSH Hub connector bundle layer.
+#
+# The connector ships with the installer as a core profile plugin, so
+# this layer does three things a delivery could not: it mounts the connector row,
+# it takes the upstream DeepSeek account provider out of the desktop composition,
+# and it closes every path that reports to an upstream DeepSeek service.
+#
+# One account service can only have one issuer (vendor/cordis refuses a second
+# registration), and on a Hub desktop the issuer is the Hub. The account page's
+# advanced switch renders a Hub overlay row that reverses the account disables
+# (and the search rows below) when a user asks for the upstream account instead;
+# that choice needs a restart because these are composition rows.
+
+- id: deepseek-account
+  disabled: true
+
+# The upstream account model route follows the account provider it belongs to.
+- id: llm-deepseek-account
+  disabled: true
+
+# Reporting paths that leave the device for an upstream DeepSeek service. A Hub
+# desktop reports to the Hub device endpoint only (rulings #3, #4): the OTLP
+# exporter posts to the upstream collector, the session-log field rides official
+# model requests, and the plugin-package inventory rides the same requests. The
+# product-telemetry rows are already off through DSH_TELEMETRY_DISABLED (see
+# packages/bundle/web-app/cordis.patch.yml), so they need no row here.
+- id: session-telemetry-otel
+  disabled: true
+- id: session-log-deepseek
+  disabled: true
+- id: plugin-package-inventory-deepseek
+  disabled: true
+
+# The session-log settings page configures the plugin above; without the plugin it
+# would edit a namespace nothing reads.
+- id: ui-settings-session-log
+  disabled: true
+
+# Search, part 1: `web-deepseek-api` stays in the composition — it is the
+# provider that registers `deepseek-search-api` / `deepseek-fetch-api`, and the Hub
+# connector points those at the Hub's own search pool (`<hub>/v1/tools`) through the
+# overlay whenever the Hub serves search. Its own defaults (`DEEPSEEK_API_KEY`,
+# api.deepseek.com) never apply, because the overlay always replaces the config; with
+# the pool off the row is mounted but nothing selects it.
+#
+# Search, part 2: the other two rows stay out. `web-search-deepseek` is the official
+# account's search route (it sends the user's own DeepSeek account token to
+# api.deepseek.com search), and `ui-settings-web-search` edits DeepSeek endpoints and
+# links to DeepSeek's documentation — a Hub desktop has neither. The advanced account
+# switch restores them together with the account provider.
+- id: web-search-deepseek
+  disabled: true
+- id: ui-settings-web-search
+  disabled: true
+
+- insert:
+    - id: hub-connector
+      name: '@dsh-hub/hub-connector'
+      config:
+        configSource: bundle
+        provideAccount: true

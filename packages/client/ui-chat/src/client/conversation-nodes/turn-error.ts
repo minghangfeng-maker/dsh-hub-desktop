@@ -40,7 +40,7 @@ function endFailure(reason: TurnEndReason): { readonly message: string; readonly
     case 'aborted':
       // User and parent cancellations show only the stopped turn summary.
       return reason.reason.kind === 'hook' && reason.reason.reason === 'deepseek-account/signed-out'
-        ? { message: 'Stopped because you signed out of DeepSeek.', code: 'ACCOUNT_SIGNED_OUT' }
+        ? { message: 'Stopped because you signed out of DSH Hub.', code: 'ACCOUNT_SIGNED_OUT' }
         : undefined
     case 'interrupted':
       return { message: 'The DSH process exited before this turn finished.', code: 'INTERRUPTED' }

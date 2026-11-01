@@ -23,6 +23,9 @@
 /deepseek-ai-dsh-llm-pi-ai/use-this-package/configure-provider-routes:
   en: c5d28300fa2cfc6f
   zh: c162855dcb54b65b
+/deepseek-ai-dsh-llm-pi-ai/use-this-package/managed-provider-routes:
+  en: 99ac853616ba995b
+  zh: e57ab91b472468b7
 /deepseek-ai-dsh-llm-pi-ai/use-this-package/sign-in-to-a-provider:
   en: c36f66438638ae08
   zh: 066a2fc4cb97c86f
@@ -48,8 +51,8 @@
   en: 8aba1113937b368a
   zh: 804a4ca672a776df
 /deepseek-ai-dsh-llm-pi-ai/understand-the-implementation/source-map:
-  en: 64912b8a3a336419
-  zh: 33a245969b4194f6
+  en: 6bde45d9338fb5b1
+  zh: 332eda574bc36b87
 /deepseek-ai-dsh-llm-pi-ai/understand-the-implementation/registration-and-directory:
   en: 0c6df3e8b6a75372
   zh: 476666a6f209542c

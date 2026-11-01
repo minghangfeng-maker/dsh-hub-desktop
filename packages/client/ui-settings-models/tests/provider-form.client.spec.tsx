@@ -106,6 +106,8 @@ function scriptedFace(options: {
   baseProviders?: Record<string, JsonValue>
   /** Routes the adapter reports as hand-declared; the rest come back as shipped. */
   declaredRoutes?: readonly string[]
+  /** Routes another owner supplies (the desktop Hub). */
+  managedRoutes?: readonly string[]
   discover?: ReturnType<typeof vi.fn>
   mutate?: ReturnType<typeof vi.fn>
   set?: ReturnType<typeof vi.fn>
@@ -123,12 +125,13 @@ function scriptedFace(options: {
         Object.keys(providers).map(provider => ({ id: provider, name: provider })),
       ))),
       listConfigurableProviders: vi.fn(() => Promise.resolve(ok(
-        Object.keys(providers).map(provider => ({
+        [...new Set([...Object.keys(providers), ...options.managedRoutes ?? []])].map(provider => ({
           provider,
-          displayName: provider,
+          displayName: provider === 'hub' ? 'DSH Hub' : provider,
           settingsNs: 'llm-pi-ai',
           settingsPath: ['providers', provider],
           declared: options.declaredRoutes?.includes(provider) ?? false,
+          ...options.managedRoutes?.includes(provider) === true ? { managed: true } : {},
         })),
       ))),
       discoverModels: discover,
@@ -814,6 +817,13 @@ describe('endpoint interrogation', () => {
   })
 })
 
+/** The rendered row of one provider route, named by its displayed name. */
+function providerRow(provider: string, displayName = provider): HTMLElement {
+  const row = screen.getByText(displayName).closest('li')
+  if (row === null) throw new Error(`no row for ${provider}`)
+  return row
+}
+
 describe('provider rows', () => {
   it('tags the routes the adapter declared, and only those', async () => {
     await mountSection({
@@ -824,15 +834,33 @@ describe('provider rows', () => {
       declaredRoutes: ['acme-gateway'],
     })
 
-    const rowOf = (provider: string): HTMLElement => {
-      const row = screen.getByText(provider).closest('li')
-      if (row === null) throw new Error(`no row for ${provider}`)
-      return row
-    }
-    expect(rowOf('acme-gateway').textContent).toContain(en.customTag)
+    expect(providerRow('acme-gateway').textContent).toContain(en.customTag)
     // `openai` carries a stored profile too — the tag follows the adapter's
     // catalog, not the presence of settings, so it stays off here.
-    expect(rowOf('openai').textContent).not.toContain(en.customTag)
+    expect(providerRow('openai').textContent).not.toContain(en.customTag)
+  })
+
+  it('marks a route another owner supplies and offers no edit or delete for it', async () => {
+    await mountSection({
+      // The Hub route lives in the adapter's managed set, so the user's section —
+      // what this page reads and writes — does not contain it at all.
+      providers: { 'acme-gateway': { apiKeyEnv: 'ACME_GATEWAY_API_KEY', baseURL: 'https://acme.test/v1' } },
+      userProviders: { 'acme-gateway': { apiKeyEnv: 'ACME_GATEWAY_API_KEY', baseURL: 'https://acme.test/v1' } },
+      managedRoutes: ['hub'],
+    })
+
+    const managedRow = providerRow('hub', 'DSH Hub')
+    expect(managedRow.textContent).toContain(en.managedTag)
+    // The owner is the Hub: neither action exists, so neither can be mistaken for one.
+    expect([...managedRow.querySelectorAll('button')].map(button => button.textContent))
+      .not.toContain(en.edit)
+    expect([...managedRow.querySelectorAll('button')].map(button => button.textContent))
+      .not.toContain(en.remove)
+    // The user's own route keeps both, and keeps the custom tag.
+    const personalRow = providerRow('acme-gateway')
+    expect([...personalRow.querySelectorAll('button')].map(button => button.textContent)).toContain(en.edit)
+    expect([...personalRow.querySelectorAll('button')].map(button => button.textContent)).toContain(en.remove)
+    expect(personalRow.textContent).not.toContain(en.managedTag)
   })
 
   it('shows no tag when the adapter draws no catalog distinction', async () => {

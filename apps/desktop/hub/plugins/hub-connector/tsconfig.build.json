@@ -1,0 +1,24 @@
+{
+  // Standalone on purpose: this program must contain only the plugin's own
+  // sources. Extending the repository base would pull `paths` mappings into the
+  // program, and `--noCheck` would then emit every mapped package source beside
+  // its own .ts file (outDir cannot hold files outside rootDir).
+  "compilerOptions": {
+    "target": "es2024",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2024"],
+    "types": ["node"],
+    "noCheck": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "declaration": false,
+    "composite": false,
+    "incremental": false,
+    "sourceMap": false,
+    "skipLibCheck": true,
+    "outDir": "lib",
+    "rootDir": "src"
+  },
+  "include": ["src"]
+}

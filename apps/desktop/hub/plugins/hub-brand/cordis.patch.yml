@@ -1,0 +1,14 @@
+# The DSH Hub brand layer.
+#
+# Upstream fills the sidebar's generic brand slots with the official DeepSeek
+# Harness occupants (`ui-brand-official`). A Hub desktop shows its own product
+# there instead, so this layer takes that row out and inserts the bundle that
+# registers the DSH Hub mark and name into the same two slots. Nothing in the
+# upstream package changes: the slots and their owner props are upstream's
+# documented extension points, and only the occupants are ours.
+- id: ui-brand-official
+  disabled: true
+
+- insert:
+    - id: hub-brand
+      name: '@dsh-hub/hub-brand'

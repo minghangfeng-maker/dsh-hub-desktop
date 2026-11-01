@@ -1,0 +1,305 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hub.example/schemas/desktop-desired-state-1.json",
+  "title": "DSH Hub Desktop desired-state manifest",
+  "description": "Hub 下发给一台桌面设备的期望状态：受管插件集合、允许下发的配置片段、app 版本策略。客户端按 revision 单调前进，解析失败时保留上一次成功应用的 revision 并上报错误。字段增删必须提升 schemaVersion；客户端遇到不支持的 schemaVersion 时不得应用，也不能清空既有状态。",
+  "$comment": "语义约束（JSON Schema 表达不了，客户端必须自己检查并在违反时拒绝整份清单）：1) level=core 的插件必须在 plugins 里，且卸载一律拒绝；2) uninstall 里的名字不得同时出现在 plugins 里；3) 同一 name 在 plugins 里只能出现一次；4) config.fragments 的 id 互不重复；5) level=core 的插件被客户端删除或禁用后，下一次拉取必须补回；6) 清单整体超过客户端上限（插件数、单包字节）时整份拒绝，不做部分应用。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "revision", "issuedAt", "plugins"],
+  "properties": {
+    "schemaVersion": {
+      "description": "清单格式版本。客户端只接受自己认识的值（当前 1）。",
+      "const": 1
+    },
+    "revision": {
+      "description": "该设备这一行期望状态的单调版本号，由 Hub 在每次相关变更时 +1。客户端只在 revision 严格大于已应用值时应用；相同 revision 只刷新 lastSeenAt，不重装。",
+      "type": "integer",
+      "minimum": 1
+    },
+    "issuedAt": {
+      "description": "Hub 生成这份清单的时刻（UTC，RFC 3339）。用于展示与「多久没拉到新状态」的判断，不用于签名校验。",
+      "type": "string",
+      "format": "date-time"
+    },
+    "expiresAt": {
+      "description": "可选。超过该时刻后，客户端把清单视为「陈旧」：仍按最后一次成功应用的状态运行，但不再用 app.minVersion 阻塞启动，并在状态卡上提示「Hub 状态过期」。缺省表示不过期（Hub 一直可答时正常情况）。",
+      "type": "string",
+      "format": "date-time"
+    },
+    "device": {
+      "description": "可选。用于客户端自检「这份清单是发给我的」，防止缓存/网关串号。设备归属由 D6 的设备表定义。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deviceId"],
+      "properties": {
+        "deviceId": {
+          "description": "D6 设备表的 device_id（服务端签发：'dv_' + 32 位小写十六进制，裁决书 #1；客户端只存不生成、原样比较、不解析）。",
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 64
+        },
+        "userId": {
+          "description": "可选。设备所属用户 id，仅供客户端展示与日志。",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "notice": {
+      "description": "可选。运维在客户端状态卡里显示的一句话（纯文本，不解释 HTML/Markdown）。",
+      "type": "string",
+      "maxLength": 500
+    },
+    "plugins": {
+      "description": "受管插件集合（声明式、全量）。客户端把「已安装的受管插件」与这里做差集：缺的装、多的按 uninstall 规则处理、版本不同的升/降、enabled 不同的启停。level=core 的条目不可缺失。",
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/plugin" }
+    },
+    "uninstall": {
+      "description": "可选。明确要求卸载的受管包名（之前由 Hub 下发过、现在要移除）。客户端只对「Hub 管理过的」包执行卸载；用户自己装的同名包视为冲突并上报，不强卸。不在 plugins 也不在 uninstall 里 = 停止管理但保留现状。",
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/packageName" }
+    },
+    "config": { "$ref": "#/$defs/config" },
+    "app": { "$ref": "#/$defs/app" },
+    "signature": { "$ref": "#/$defs/signature" }
+  },
+  "$defs": {
+    "packageName": {
+      "description": "npm 包名（可带 scope）。与 dsh 插件管理器的 install-spec 解析规则一致。",
+      "type": "string",
+      "maxLength": 214,
+      "pattern": "^(?:@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*$"
+    },
+    "semver": {
+      "description": "语义化版本（允许预发布与构建元数据）。客户端用 semver 解析，解析失败即拒绝该条目。",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "sha256": {
+      "description": "小写十六进制 SHA-256（64 位）。",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "artifact": {
+      "description": "插件 tgz 的取件方式。客户端必须：先下载到本地缓存、核对 sha256 与 bytes、再以 file: 绝对路径交给插件管理器安装；不得把 URL 直接交给 pnpm（那样没有哈希校验，且离线重装会依赖网络）。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "sha256", "bytes"],
+      "properties": {
+        "url": {
+          "description": "HTTPS 取件地址。允许带一次性签名查询串；客户端不得把 token 写进日志。",
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^https://"
+        },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "bytes": {
+          "description": "tgz 字节数，用于下载前配额判断与下载后核对。",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "filename": {
+          "description": "可选。缓存文件名；缺省由客户端按「包名-版本.tgz」规范化生成（见插件管理器的 safeStoreFileName 规则）。",
+          "type": "string",
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.tgz$"
+        },
+        "expiresAt": {
+          "description": "可选。签名 URL 的失效时刻；过期后客户端必须重新拉清单，不得复用旧 URL。",
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "patchEntry": {
+      "description": "一条 Cordis patch 条目，语义与 Hub 容器侧 managed.patch.yml 的条目完全一致：顶层数组的一项。有 id 表示覆盖已有条目（config 整块替换、不深合并），有 insert 表示插入新条目。客户端渲染时不得求值 !!js（按字符串原样保留）。",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "目标 Loader 条目 id。",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "config": {
+          "description": "整块替换的配置对象。必须写全该条目需要的字段（DSH 不做深合并）。",
+          "type": "object"
+        },
+        "disabled": {
+          "description": "可选。true 表示禁用该条目。",
+          "type": "boolean"
+        },
+        "insert": {
+          "description": "插入条目列表；每项至少要有 id 与 name。",
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["id", "name"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1, "maxLength": 120 },
+              "name": { "type": "string", "minLength": 1, "maxLength": 300 }
+            }
+          }
+        }
+      },
+      "oneOf": [
+        { "required": ["id"], "properties": { "id": true } },
+        { "required": ["insert"], "properties": { "insert": true } }
+      ]
+    },
+    "plugin": {
+      "description": "一个受管插件。level 决定用户的处置权限，映射 Hub 插件库的 policy：required→core、default→default、optional→optional；hidden 不下发。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "level", "artifact"],
+      "properties": {
+        "name": { "$ref": "#/$defs/packageName" },
+        "version": { "$ref": "#/$defs/semver" },
+        "level": {
+          "description": "core：随包必装、用户不可卸载也不可禁用，缺了下次拉取必被补回；default：首装自动装上、用户可禁用/卸载；optional：仅展示可装，装不装由用户决定。上报时映射为 D6 的 source：hub-core / hub-default / hub-optional。",
+          "enum": ["core", "default", "optional"]
+        },
+        "enabled": {
+          "description": "可选，默认 true。false 表示装好但禁用（只对 default/optional 有意义；core 必须为 true）。",
+          "type": "boolean"
+        },
+        "artifact": { "$ref": "#/$defs/artifact" },
+        "bundleOrder": {
+          "description": "可选。Hub 管理的 bundle 在 dsh.profile.bundles 里的相对次序（小的在前）。出厂 bundle 永远在前、用户自装的永远在后，与 Hub 容器侧规则一致。",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "needsRestart": {
+          "description": "可选，默认 false。Hub 插件库的 needs_restart；true 表示装完必须重启 Host 才生效，客户端据此决定是否弹「重启」。",
+          "type": "boolean"
+        },
+        "minDsh": {
+          "description": "可选。插件声明的 DSH 版本范围（engines.dsh 原文）。客户端在安装前自检，不符则不装并上报 incompatible，而不是让 Host 启动失败。",
+          "type": "string",
+          "maxLength": 200
+        },
+        "config": {
+          "description": "可选。该插件自带的配置片段（对应 Hub 插件库的 config_yaml），与顶层 config.fragments 合并；同名条目以顶层为准。保留 id 规则同 Hub 容器侧：插件的片段不得写 llm-pi-ai / agent-default-model / workspace-controller / webserver，客户端丢弃并告警。",
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/patchEntry" }
+        },
+        "reason": {
+          "description": "可选。给用户看的一句「为什么给你装这个」。",
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "configFragment": {
+      "description": "一条 Hub 下发的配置覆盖。mode 决定它落在哪一层：enforce = 放进 Hub 的 --patch overlay（优先级最高，用户与 config-editor 都改不动这些键，与容器侧 managed.patch.yml 等价）；default = 只在用户自己的 patch 层没有该条目时生效（由客户端写入 Hub 的「默认层」，用户改过就不覆盖）。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "mode", "config"],
+      "properties": {
+        "id": {
+          "description": "目标 Loader 条目 id。",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "mode": { "enum": ["enforce", "default"] },
+        "config": {
+          "description": "整块替换的配置对象。enforce 模式下必须写全字段。",
+          "type": "object"
+        },
+        "note": {
+          "description": "可选。管理端备注，客户端可原样显示在「Hub 下发的设置」里。",
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "config": {
+      "description": "配置下发段。整段由 Hub 生成，客户端按 id 全量比对：清单里没有的片段从 Hub 层删除（不触碰用户自己的 patch）。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fragments"],
+      "properties": {
+        "fragments": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/configFragment" }
+        },
+        "digest": {
+          "description": "可选。Hub 对 fragments 的规范化摘要（sha256:…），只用于客户端落盘后自校验（防截断/篡改）。按裁决书 #3 它**不回传**上报接口（配置空间小，内容指纹是可暴力比对的靶）；要确认版本用 appliedRevision。",
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "allowlistVersion": {
+          "description": "可选。Hub 侧配置白名单版本号；客户端只接受自己实现过的值，用于两端演进的显式握手。",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "app": {
+      "description": "app 版本策略。minVersion 由客户端比较本地 app.getVersion()；targetVersion 只是展示与「建议升级」，真正的升级产物由 updater feed 决定。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "minVersion"],
+      "properties": {
+        "channel": {
+          "description": "该设备所属发布通道。必须与安装包内封的 dshDesktopUpdateChannel 一致；不一致时客户端只上报、不改通道（切通道需要换安装包）。",
+          "enum": ["nightly", "latest"]
+        },
+        "minVersion": {
+          "description": "最低可运行版本。本地版本低于它时进入强制更新阻塞（复用壳的 40005 弹窗）。minVersionHard=false 时允许「稍后（24h）」；true 时不可绕过。",
+          "$ref": "#/$defs/semver"
+        },
+        "minVersionHard": {
+          "description": "可选，默认 false。硬阻塞仅用于安全或破坏性变更；正常升级下发用 false。",
+          "type": "boolean"
+        },
+        "targetVersion": {
+          "description": "可选。该设备的升级目标版本（分角色/分阶段下发的核心字段）。客户端据此在状态卡提示「可升级到 X」，并可与 feed 的实际最新版比较；不改变 feed 内容本身。",
+          "$ref": "#/$defs/semver"
+        },
+        "feedUrl": {
+          "description": "可选。该设备专属的 updater feed 根 URL（generic provider，末尾带 /）。壳用它覆盖 app-update.yml 里封的地址，从而让 Hub 按设备/角色返回不同 YAML。缺省 = 用安装包里封的静态 feed。必须是 HTTPS origin + 路径，不带查询串。",
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^https://[^?#]+/$"
+        }
+      }
+    },
+    "signature": {
+      "description": "可选的清单签名（v2 能力）。存在时客户端必须验签，验签失败整份拒绝；不存在时按 v1 规则（HTTPS + 逐包 sha256）处理。签名覆盖本对象之前的所有字段，规范化方式为 RFC 8785 (JCS)，签名值本身不参与计算。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alg", "keyId", "value", "signedAt"],
+      "properties": {
+        "alg": { "enum": ["ed25519"] },
+        "keyId": {
+          "description": "签名密钥标识；客户端只认识内置公钥表里的 id。",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "value": {
+          "description": "对 JCS 规范化后的清单（不含 signature 成员）的 Ed25519 签名，base64。",
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+        },
+        "signedAt": { "type": "string", "format": "date-time" },
+        "canonicalization": { "const": "jcs-rfc8785" }
+      }
+    }
+  }
+}

@@ -16,11 +16,23 @@ const CLIENT_BUILD_ENV_PREFIX = 'DSH_CLIENT_'
 /** Non-public selector used by build orchestration to request a named client profile. */
 export const CLIENT_BUILD_PROFILE_SELECTOR = 'DSH_BUILD_CLIENT_PROFILE'
 
-/** Public client environment required by official DSH artifacts. */
-const OFFICIAL_CLIENT_BUILD_ENVIRONMENT = {
-  DSH_CLIENT_BUILD_PROFILE: 'official',
-  DSH_CLIENT_TITLE: 'DeepSeek Harness',
-} as const
+/** Product name the official client artifacts embed when the build names none. */
+const DEFAULT_CLIENT_TITLE = 'DeepSeek Harness'
+
+/**
+ * Public client environment required by official DSH artifacts.
+ *
+ * The document title is the one official value a downstream product renames: it
+ * is the browser tab and window title, so a branded build supplies its own
+ * `DSH_CLIENT_TITLE` instead of shipping the upstream product name. Everything
+ * else in the official profile stays fixed.
+ * @param environment - build environment that may carry a title.
+ * @returns the official profile's public values.
+ */
+function officialClientBuildValues(environment: NodeJS.ProcessEnv): Record<`DSH_CLIENT_${string}`, string> {
+  const title = (environment.DSH_CLIENT_TITLE ?? '').trim()
+  return { DSH_CLIENT_BUILD_PROFILE: 'official', DSH_CLIENT_TITLE: title === '' ? DEFAULT_CLIENT_TITLE : title }
+}
 
 /** Public variable carrying the source commit embedded in client artifacts. */
 const CLIENT_COMMIT_HASH_VARIABLE = 'DSH_CLIENT_COMMIT_HASH'
@@ -145,7 +157,7 @@ export function officialClientBuildEnvironment(
   return {
     DSH_CLIENT_COMMIT_HASH: repositoryCommitHash(root, environment),
     DSH_CLIENT_VERSION: repositoryVersion(root),
-    ...OFFICIAL_CLIENT_BUILD_ENVIRONMENT,
+    ...officialClientBuildValues(environment),
   }
 }
 
@@ -201,7 +213,7 @@ export function resolveClientBuildEnvironment(
     return {
       DSH_CLIENT_COMMIT_HASH: commitHash,
       DSH_CLIENT_VERSION: version,
-      ...OFFICIAL_CLIENT_BUILD_ENVIRONMENT,
+      ...officialClientBuildValues(environment),
     }
   }
   throw new Error(`unknown client build profile ${JSON.stringify(profile)}; expected "official"`)

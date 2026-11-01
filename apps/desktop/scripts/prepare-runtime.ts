@@ -19,6 +19,16 @@ const RUNTIME_ROOT = BUILD_PATHS.runtime
 
 type DesktopTarget = ReturnType<typeof desktopTargetPlatform>
 
+/** Read the Node version one Electron release embeds, without executing a distribution. */
+async function electronNodeVersion(version: string): Promise<string> {
+  const response = await fetch('https://releases.electronjs.org/releases.json')
+  if (!response.ok) throw new Error(`desktop runtime: Electron release metadata responded ${String(response.status)}`)
+  const releases = await response.json() as { version?: string; node?: string }[]
+  const node = releases.find(release => release.version === version)?.node
+  if (node === undefined) throw new Error(`desktop runtime: Electron ${version} is not in the release metadata`)
+  return node
+}
+
 /** Extract the target Electron distribution and return its embedded Node version. */
 async function prepareElectron({ platform, arch }: DesktopTarget): Promise<string> {
   const require = createRequire(import.meta.url)
@@ -28,6 +38,11 @@ async function prepareElectron({ platform, arch }: DesktopTarget): Promise<strin
   rmSync(BUILD_PATHS.electron, { recursive: true, force: true })
   await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'extract:electron', () => extractZip(archive, { dir: BUILD_PATHS.electron }))
   const executable = join(BUILD_PATHS.electron, platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron')
+  // Hub build: a cross-target run cannot execute the target binary. One Electron version
+  // embeds one Node version on every platform, so read it from Electron's release metadata.
+  if (platform !== process.platform) {
+    return packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'electron:node-version', () => electronNodeVersion(version))
+  }
   return execFileSync(executable, ['-p', 'process.versions.node'], {
     encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
   }).trim()

@@ -90,6 +90,10 @@ Each profile may set a `retryPolicy`; omission uses normal mode with five retrie
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-llm-pi-ai) is the exhaustive source for every accepted field and its JSDoc.
 
+### Managed provider routes
+
+A composition can register routes another plugin owns beside the user's own section. The adapter provides the `llmPiAiManaged` service; a contributor takes one slot and replaces that slot's whole provider set, which is validated by this package's schema and route rules and checked against the user's routes and every other contributor before anything moves. A refused replacement leaves the previous set serving. Configuration surfaces see the union — the request routes, the model list, and the configurable-provider directory — while `settings.describe` and every profile write still cover only the user's section. Those directory entries carry `managed: true`, which is how a surface shows a route read-only instead of offering an edit that would write a duplicate. Withdrawing a slot removes exactly its routes; a composition with no contributor behaves as before. A personal provider that names a managed route is refused by the configuration check rather than silently routed to the owner's endpoint.
+
 ### Sign in to a provider
 
 A provider pi-ai ships a login for can be signed into through the harness authorization seam: the flow offers OAuth or an interactive key prompt (a key is typed into pi-ai's own login prompt, not into the settings form), and the resulting credential is stored in the harness credential store at `llm-pi-ai/<provider id>`. The stored sign-in authenticates its route beneath any `apiKeyEnv` override and refreshes itself under the store's cross-process lock; signing out deletes the stored record. A hand-declared route key outside the record grammar — a lowercase hyphenated identifier — cannot be signed into, because a record write for it refuses with `LlmError('UNSTORABLE_PROVIDER_ID')`; such a route authenticates through `apiKeyEnv` or ambient provider settings instead.
@@ -145,6 +149,7 @@ Initial prompt text and active tools use pi-ai's `Context.systemPrompt` and `Con
 | File | Role |
 |---|---|
 | [`src/index.ts`](src/index.ts) | Config snapshots, directory and route registration |
+| [`src/managed.ts`](src/managed.ts) | Managed provider sets another plugin contributes beside the user's routes |
 | [`src/auth.ts`](src/auth.ts) | The credential store and ambient auth context over the harness credential plane |
 | [`src/login.ts`](src/login.ts) | Authorization flows for the installed providers that ship a login |
 | [`src/config.ts`](src/config.ts) | Profile schema, resolution, and serviceability checks |

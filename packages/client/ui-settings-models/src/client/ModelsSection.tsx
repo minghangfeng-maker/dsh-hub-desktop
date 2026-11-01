@@ -431,7 +431,9 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
           const error = row.entry.error === undefined
             ? null
             : <p role="alert" className={styles['error']}>{row.entry.error}</p>
-          if (needsSetup(row, anyUsable) && !dismissedSetup.has(row.entry.provider)) {
+          // A managed route has no credential of its own to set up here: the owner
+          // supplies it, and an editor on this page would write a duplicate.
+          if (row.entry.managed !== true && needsSetup(row, anyUsable) && !dismissedSetup.has(row.entry.provider)) {
             // First-run posture: the provider exists but has no key — the
             // setup card IS its presence on the page, until the user closes it.
             return (
@@ -468,9 +470,11 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                   {/* Only the adapter can tell a hand-declared route from a
                       shipped one it also has a stored profile for, so the tag
                       follows its answer and stays off when it gives none. */}
-                  {row.entry.declared === true
-                    ? <span className={styles['rowTag']}>{t('customTag')}</span>
-                    : null}
+                  {row.entry.managed === true
+                    ? <span className={styles['rowTag']} title={t('managedProviderReadOnly')}>{t('managedTag')}</span>
+                    : row.entry.declared === true
+                      ? <span className={styles['rowTag']}>{t('customTag')}</span>
+                      : null}
                   {/* The store keeps the account row only while the account lists models. */}
                   {row.entry.provider === 'deepseek-account'
                     ? (
@@ -501,8 +505,10 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                       : null}
                 </span>
                 <span className={styles['rowActions']}>
-                  {/* The account catalog comes from the account listing; its model overrides live in cordis.patch.yml. */}
-                  {row.entry.provider === 'deepseek-account'
+                  {/* The account catalog comes from the account listing; its model
+                      overrides live in cordis.patch.yml. A managed route belongs to
+                      the service that contributed it, so this page offers no edit. */}
+                  {row.entry.provider === 'deepseek-account' || row.entry.managed === true
                     ? null
                     : (
                       <button

@@ -7,6 +7,8 @@ const electron = vi.hoisted(() => ({
   create: vi.fn<(options: unknown) => ReturnType<typeof createWindow>>(),
   root: '/desktop-app',
   handlers: new Map<string, (event: unknown, value?: unknown, attributes?: unknown) => Promise<unknown>>(),
+  /** Synchronous answer channels (`ipcMain.on`), keyed by name. */
+  listeners: new Map<string, (event: { sender?: unknown; returnValue?: unknown }) => void>(),
 }))
 vi.mock('electron', () => ({
   app: { getAppPath: () => electron.root },
@@ -17,6 +19,10 @@ vi.mock('electron', () => ({
       electron.handlers.set(name, handler)
     },
     removeHandler: (name: string) => electron.handlers.delete(name),
+    on: (name: string, listener: (event: { sender?: unknown; returnValue?: unknown }) => void) => {
+      electron.listeners.set(name, listener)
+    },
+    removeListener: (name: string) => electron.listeners.delete(name),
   },
 }))
 
@@ -37,9 +43,10 @@ function createWindow() {
   }
 }
 
-beforeEach(() => { electron.create.mockReset(); electron.handlers.clear() })
+beforeEach(() => { electron.create.mockReset(); electron.handlers.clear(); electron.listeners.clear() })
 
 const operations = {
+  allowApiKey: false,
   analyticsEnabled: async () => true,
   takeNotice: async () => undefined,
   startSignIn: async () => ({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out' as const, attempt: null }),
@@ -47,6 +54,7 @@ const operations = {
   copySignInLink: async () => undefined,
   saveApiKey: () => Promise.resolve({ ok: true as const }),
   skip: () => Promise.resolve(),
+  enterOffline: () => Promise.resolve(),
 }
 
 describe('desktop welcome window', () => {
@@ -116,9 +124,10 @@ describe('desktop welcome window', () => {
     electron.create.mockReturnValue(window)
     const saveApiKey = vi.fn(operations.saveApiKey)
     const skip = vi.fn(operations.skip)
+    const enterOffline = vi.fn(operations.enterOffline)
     const copySignInLink = vi.fn(operations.copySignInLink)
     const takeNotice = vi.fn(async () => 'session-expired' as const)
-    await openWelcomeWindow(resolveDesktopLocale('en'), { ...operations, saveApiKey, skip, copySignInLink, takeNotice })
+    await openWelcomeWindow(resolveDesktopLocale('en'), { ...operations, saveApiKey, skip, enterOffline, copySignInLink, takeNotice })
     const own = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
     const take = electron.handlers.get(WELCOME_IPC.takeNotice)!
     await expect(take({ ...own, senderFrame: {} })).rejects.toThrow('unowned frame')
@@ -133,6 +142,10 @@ describe('desktop welcome window', () => {
     expect(await save(own, 'sk-test')).toEqual({ ok: true })
     await electron.handlers.get(WELCOME_IPC.skip)!(own)
     expect(skip).toHaveBeenCalledOnce()
+    await expect(electron.handlers.get(WELCOME_IPC.offline)!({ ...own, senderFrame: {} })).rejects.toThrow('unowned frame')
+    expect(enterOffline).not.toHaveBeenCalled()
+    await electron.handlers.get(WELCOME_IPC.offline)!(own)
+    expect(enterOffline).toHaveBeenCalledOnce()
     const copy = electron.handlers.get(WELCOME_IPC.copyLink)!
     await expect(copy({ ...own, senderFrame: {} }, 'attempt')).rejects.toThrow('unowned frame')
     await expect(copy(own, 42)).rejects.toThrow('invalid attempt')

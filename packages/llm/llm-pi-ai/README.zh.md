@@ -90,6 +90,10 @@ kind: "package-reference"
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-llm-pi-ai)是每个受支持字段及其 JSDoc 的穷尽式真源。
 
+### 受管 provider 路由
+
+组合可以让另一个插件把自己的路由与用户自己的配置段并列注册。适配器提供 `llmPiAiManaged` 服务；贡献方占一个槽位，整组替换该槽位的 provider 集合，替换先经本包的配置 schema 与路由规则校验，并检查是否与用户路由和其他贡献方冲突，通过后才切换。被拒绝的替换保留原来的集合继续服务。配置界面看到的是并集——请求可用路由、模型列表和可配置 provider 目录；而 `settings.describe` 与所有 profile 写入仍然只覆盖用户自己的配置段。这些目录条目带 `managed: true`，界面据此把路由显示为只读，而不是提供一个会写出重复项的编辑入口。撤销槽位只移除它自己的路由；没有贡献方的组合与以前完全一致。个人 provider 若占用受管路由，会被配置校验明确拒绝，而不会静默改发到所有者的端点。
+
 ### 登录提供方
 
 pi-ai 提供登录的提供方可以通过 harness 授权 seam 登录：流程提供 OAuth 或交互式密钥提示（密钥键入 pi-ai 自己的登录提示，而非设置表单），得到的凭据存储在 harness 凭据存储的 `llm-pi-ai/<provider id>` 记录中。存储的登录在其路由的 `apiKeyEnv` 覆盖之下完成认证，并在存储的跨进程锁下自行刷新；退出登录即删除存储记录。落在记录文法之外——小写连字符标识符——的手工声明路由键无法登录，因为对它的记录写入会以 `LlmError('UNSTORABLE_PROVIDER_ID')` 拒绝；这类路由改用 `apiKeyEnv` 或提供方 ambient 设置认证。
@@ -145,6 +149,7 @@ Config 更新严格验证发生变化的 provider。初始加载将已存储的�
 | 文件 | 职责 |
 |---|---|
 | [`src/index.ts`](src/index.ts) | Config 快照、目录及路由注册 |
+| [`src/managed.ts`](src/managed.ts) | 由其他插件与用户路由并列贡献的受管 provider 集合 |
 | [`src/auth.ts`](src/auth.ts) | 覆盖 harness 凭据平面的凭据存储与 ambient auth context |
 | [`src/login.ts`](src/login.ts) | 面向提供登录的已安装提供方的授权流程 |
 | [`src/config.ts`](src/config.ts) | Profile schema、解析与可服务性校验 |

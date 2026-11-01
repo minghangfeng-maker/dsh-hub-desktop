@@ -4,4 +4,5 @@ DeepSeek Harness
 复制登录链接
 正在完成登录… [disabled]
 取消
+Powered by xdedmi
 复制登录链接，用浏览器手动打开完成登录

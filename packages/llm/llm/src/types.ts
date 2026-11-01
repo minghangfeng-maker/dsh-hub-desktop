@@ -273,6 +273,14 @@ export interface LlmConfigurableProvider {
   baseURLEnv?: readonly string[]
   /** Authentication the adapter performs when the profile names no credential reference; absent when it reports none. */
   nativeAuth?: LlmNativeAuth
+  /**
+   * Whether another owner (a deployment service, a management backend) supplies
+   * this route rather than the user's own settings section. A managed route is
+   * shown read-only: editing its profile through `settingsNs` would write a
+   * duplicate the manager replaces on the next delivery, so a surface must offer
+   * no edit or delete affordance for it.
+   */
+  managed?: boolean
   /** Configuration diagnostic for repair; unaffected models may remain serviceable. */
   error?: string
 }

@@ -3,7 +3,7 @@ import * as fs from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, onTestFinished, vi } from 'vitest'
-import { readDesktopSettings } from '../src/settings.ts'
+import { readDesktopSettings, writeDesktopSettings } from '../src/settings.ts'
 
 vi.mock('node:fs', async importOriginal => ({ ...await importOriginal<typeof import('node:fs')>() }))
 
@@ -22,8 +22,16 @@ it('creates a discoverable default file on first launch without touching other p
   const { userData, path } = fixture()
   rmSync(join(userData, 'desktop'), { recursive: true })
   writeFileSync(join(userData, 'keybindings.json'), 'existing shortcuts\n')
-  expect(readDesktopSettings(userData)).toEqual({ updates: { allowTestAuthPopupWindow: false } })
-  expect(readFileSync(path, 'utf8')).toBe('{\n  "updates": {\n    "allowTestAuthPopupWindow": false\n  }\n}\n')
+  expect(readDesktopSettings(userData)).toEqual({
+    updates: { allowTestAuthPopupWindow: false },
+    welcome: { offline: false },
+    runtime: { pythonUtf8: true },
+  })
+  expect(readFileSync(path, 'utf8')).toBe(`${JSON.stringify({
+    updates: { allowTestAuthPopupWindow: false },
+    welcome: { offline: false },
+    runtime: { pythonUtf8: true },
+  }, null, 2)}\n`)
   expect(readFileSync(join(userData, 'keybindings.json'), 'utf8')).toBe('existing shortcuts\n')
 })
 
@@ -31,6 +39,8 @@ it.each(['{}', '{"updates": {}}', '{"other": 1, "updates": {"other": true}}'])('
   const { userData, path } = fixture()
   writeFileSync(path, raw)
   expect(readDesktopSettings(userData).updates.allowTestAuthPopupWindow).toBe(false)
+  expect(readDesktopSettings(userData).welcome.offline).toBe(false)
+  expect(readDesktopSettings(userData).runtime.pythonUtf8).toBe(true)
   expect(readFileSync(path, 'utf8')).toBe(raw)
 })
 
@@ -48,9 +58,10 @@ it('loads explicit opt-in and opt-out on the next read without changing an earli
   expect(readDesktopSettings(userData).updates.allowTestAuthPopupWindow).toBe(true)
 })
 
-it.each(['', '{', 'null', '[]', '{"updates":null}', '{"updates":[]}',
-  '{"updates":{"allowTestAuthPopupWindow":"false"}}', '{"updates":{"allowTestAuthPopupWindow":1}}',
-  '{"updates":{"allowTestAuthPopupWindow":null}}'])('reports invalid settings with their path and preserves the original: %s', (raw) => {
+it.each(['', '{', 'null', '[]', '{"updates":null}', '{"updates":[]}', '{"welcome":null}', '{"welcome":[]}',
+  '{"runtime":[]}', '{"updates":{"allowTestAuthPopupWindow":"false"}}', '{"updates":{"allowTestAuthPopupWindow":1}}',
+  '{"updates":{"allowTestAuthPopupWindow":null}}', '{"welcome":{"offline":"true"}}', '{"welcome":{"offline":1}}',
+  '{"runtime":{"pythonUtf8":"true"}}', '{"runtime":{"pythonUtf8":1}}'])('reports invalid settings with their path and preserves the original: %s', (raw) => {
   const { userData, path } = fixture()
   writeFileSync(path, raw)
   expect(readDesktopSettings(userData).updates.allowTestAuthPopupWindow).toBe(false)
@@ -80,4 +91,52 @@ it('continues with defaults even when warning output fails', () => {
   vi.mocked(console.warn).mockImplementation(() => { throw new Error('output unavailable') })
   expect(readDesktopSettings(userData).updates.allowTestAuthPopupWindow).toBe(false)
   expect(readFileSync(path, 'utf8')).toBe('{')
+})
+
+it('writes the offline choice atomically and keeps keys and fields it does not own', () => {
+  const { userData, path } = fixture()
+  writeFileSync(path, JSON.stringify({ updates: { allowTestAuthPopupWindow: true, custom: 'keep' }, custom: 'preserve' }))
+  const settings = readDesktopSettings(userData)
+  writeDesktopSettings(userData, { ...settings, welcome: { offline: true } })
+  expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({
+    updates: { allowTestAuthPopupWindow: true, custom: 'keep' },
+    welcome: { offline: true },
+    runtime: { pythonUtf8: true },
+    custom: 'preserve',
+  })
+  expect(readDesktopSettings(userData).welcome.offline).toBe(true)
+  expect(readFileSync(path, 'utf8').endsWith('}\n')).toBe(true)
+})
+
+it('creates the settings document on the first write', () => {
+  const { userData, path } = fixture()
+  rmSync(join(userData, 'desktop'), { recursive: true })
+  const next = { updates: { allowTestAuthPopupWindow: false }, welcome: { offline: true }, runtime: { pythonUtf8: true } }
+  writeDesktopSettings(userData, next)
+  expect(readDesktopSettings(userData).welcome.offline).toBe(true)
+  expect(readFileSync(path, 'utf8')).toContain('"offline": true')
+})
+
+it('replaces an unreadable document and leaves no temporary file behind', () => {
+  const { userData, path } = fixture()
+  writeFileSync(path, '{not json')
+  const next = { updates: { allowTestAuthPopupWindow: false }, welcome: { offline: true }, runtime: { pythonUtf8: true } }
+  writeDesktopSettings(userData, next)
+  expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ welcome: { offline: true } })
+  expect(fs.readdirSync(join(userData, 'desktop'))).toEqual(['settings.json'])
+})
+
+it('fails loudly when the replacement cannot complete and keeps the previous document', () => {
+  const { userData, path } = fixture()
+  const previous = JSON.stringify({ welcome: { offline: false } })
+  writeFileSync(path, previous)
+  const failure = Object.assign(new Error('rename denied'), { code: 'EACCES' })
+  vi.spyOn(fs, 'renameSync').mockImplementation(() => { throw failure })
+  expect(() => {
+    writeDesktopSettings(userData, {
+      updates: { allowTestAuthPopupWindow: false }, welcome: { offline: true }, runtime: { pythonUtf8: true },
+    })
+  }).toThrow(failure)
+  expect(readFileSync(path, 'utf8')).toBe(previous)
+  expect(fs.readdirSync(join(userData, 'desktop'))).toEqual(['settings.json'])
 })

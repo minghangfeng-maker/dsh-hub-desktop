@@ -1,8 +1,9 @@
 DeepSeek Harness
 DeepSeek Harness
 Add an API key to get started
-Configure official DeepSeek models to start using Harness
+A DSH Hub account brings its own models; an API key is the offline fallback
 Enter API key [password]
 Save and continue [disabled]
 Set up later
 Back to sign in
+Powered by xdedmi

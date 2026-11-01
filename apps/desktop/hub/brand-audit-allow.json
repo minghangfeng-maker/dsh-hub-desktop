@@ -1,0 +1,127 @@
+{
+  "//": "Every upstream DeepSeek mention audit-brand.mjs accepts, with the classification this audit table uses. A = product name (never allowed: it must be replaced with DSH Hub), B = a real model, provider, or service of the official DeepSeek platform, C = an external link or entry point to an upstream site, D = a report that leaves the device for an upstream service. An entry may name `disabledRow`: then the Hub bundle layer must still disable that row, and the check fails once it stops doing so.",
+  "entries": [
+    {
+      "file": "packages/client/ui-settings-models/src/client/locales.ts",
+      "match": "https://api.deepseek.com/anthropic (Default to use DEEPSEEK_BASE_URL)",
+      "category": "B",
+      "reason": "Endpoint of the official DeepSeek provider. The Hub composition routes models through the Hub; this field is edited only in the advanced DeepSeek-account mode, where the official endpoint is the real subject."
+    },
+    {
+      "file": "packages/client/ui-settings-models/src/client/locales.ts",
+      "match": "Configure the official DeepSeek provider to start building.",
+      "category": "B",
+      "reason": "Sign-in prompt of the official DeepSeek model provider (a real service, not our product name); reachable only with the advanced account switch, which hands the route to that provider."
+    },
+    {
+      "file": "packages/client/ui-settings-models/src/client/locales.ts",
+      "match": "https://api.deepseek.com/anthropic（默认使用环境 DEEPSEEK_BASE_URL）",
+      "category": "B",
+      "reason": "Chinese copy of the same official DeepSeek provider endpoint."
+    },
+    {
+      "file": "packages/client/ui-settings-models/src/client/locales.ts",
+      "match": "配置 DeepSeek 官方模型，即可开始使用。",
+      "category": "B",
+      "reason": "Chinese copy of the official DeepSeek provider sign-in prompt."
+    },
+    {
+      "file": "packages/client/ui-settings-session-log/src/client/locales.ts",
+      "match": "Help improve DeepSeek models and products.",
+      "category": "D",
+      "disabledRow": "ui-settings-session-log",
+      "reason": "Session-log upload to an upstream DeepSeek service. The Hub bundle layer disables both the uploader (session-log-deepseek) and this page; the string only remains in an uncomposed bundle."
+    },
+    {
+      "file": "packages/client/ui-settings-session-log/src/client/locales.ts",
+      "match": "帮助改进 DeepSeek 模型与产品",
+      "category": "D",
+      "disabledRow": "ui-settings-session-log",
+      "reason": "Chinese copy of the same session-log upload page."
+    },
+    {
+      "file": "packages/client/ui-settings-web-search/src/client/locales.ts",
+      "match": "Set up the DeepSeek search provider.",
+      "category": "C",
+      "disabledRow": "ui-settings-web-search",
+      "reason": "Settings entry for the DeepSeek search API. The Hub serves search through its own pool, so the Hub bundle layer removes this page and the official search route; the advanced account switch restores them."
+    },
+    {
+      "file": "packages/client/ui-settings-web-search/src/client/locales.ts",
+      "match": "Off by default: search runs through DeepSeek Messages.",
+      "category": "C",
+      "disabledRow": "ui-settings-web-search",
+      "reason": "Same page: hint about the DeepSeek Messages search route."
+    },
+    {
+      "file": "packages/client/ui-settings-web-search/src/client/locales.ts",
+      "match": "https://api-docs.deepseek.com/guides/search",
+      "category": "C",
+      "disabledRow": "ui-settings-web-search",
+      "reason": "Same page: link into DeepSeek's API documentation."
+    },
+    {
+      "file": "packages/client/ui-settings-web-search/src/client/locales.ts",
+      "match": "only conversations using a DeepSeek Account model can search",
+      "category": "C",
+      "disabledRow": "ui-settings-web-search",
+      "reason": "Same page: explains the official-account search path."
+    },
+    {
+      "file": "packages/client/ui-settings-web-search/src/client/locales.ts",
+      "match": "Include the API prefix, such as https://api.deepseek.com/anthropic/v1.",
+      "category": "C",
+      "disabledRow": "ui-settings-web-search",
+      "reason": "Same page: placeholder for the official messages endpoint."
+    },
+    {
+      "file": "packages/client/ui-settings-web-search/src/client/locales.ts",
+      "match": "Include the API prefix, such as https://api.deepseek.com/v1/tools.",
+      "category": "C",
+      "disabledRow": "ui-settings-web-search",
+      "reason": "Same page: placeholder for the official search and fetch endpoint."
+    },
+    {
+      "file": "packages/client/ui-settings-web-search/src/client/locales.ts",
+      "match": "设置 DeepSeek 的搜索提供方。",
+      "category": "C",
+      "disabledRow": "ui-settings-web-search",
+      "reason": "Chinese copy of the same disabled search settings page."
+    },
+    {
+      "file": "packages/client/ui-settings-web-search/src/client/locales.ts",
+      "match": "默认关闭，搜索通过 DeepSeek Messages 完成。",
+      "category": "C",
+      "disabledRow": "ui-settings-web-search",
+      "reason": "Chinese copy of the DeepSeek Messages search hint."
+    },
+    {
+      "file": "packages/client/ui-settings-web-search/src/client/locales.ts",
+      "match": "https://api-docs.deepseek.com/zh-cn/guides/search",
+      "category": "C",
+      "disabledRow": "ui-settings-web-search",
+      "reason": "Chinese copy of the DeepSeek API documentation link."
+    },
+    {
+      "file": "packages/client/ui-settings-web-search/src/client/locales.ts",
+      "match": "仅使用 DeepSeek 账号模型的对话可以通过默认接口地址搜索",
+      "category": "C",
+      "disabledRow": "ui-settings-web-search",
+      "reason": "Chinese copy of the official-account search explanation."
+    },
+    {
+      "file": "packages/client/ui-settings-web-search/src/client/locales.ts",
+      "match": "例如 https://api.deepseek.com/anthropic/v1；程序追加 /messages",
+      "category": "C",
+      "disabledRow": "ui-settings-web-search",
+      "reason": "Chinese copy of the official messages endpoint placeholder."
+    },
+    {
+      "file": "packages/client/ui-settings-web-search/src/client/locales.ts",
+      "match": "例如 https://api.deepseek.com/v1/tools；程序追加 /search 或 /fetch",
+      "category": "C",
+      "disabledRow": "ui-settings-web-search",
+      "reason": "Chinese copy of the official search and fetch endpoint placeholder."
+    }
+  ]
+}

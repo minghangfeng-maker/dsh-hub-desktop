@@ -153,6 +153,8 @@ const harness = await vi.hoisted(async () => {
   const app = Object.assign(new EventEmitter(), {
     isPackaged: true,
     name: 'Desktop test',
+    // The shell renames the application before resolving any path, so the double must accept it.
+    setName: vi.fn(),
     whenReady: () => Promise.resolve(),
     getLocale: (): string => 'en-US',
     getPreferredSystemLanguages: () => ['en-US'],
@@ -2184,7 +2186,9 @@ describe('desktop main startup', () => {
         profilePatchBackup: 'desktop-test-profile/cordis.patch.yml.bak-1789555200000', homePatch: 'unchanged',
       })
     } else {
-      expect(console.info).not.toHaveBeenCalled()
+      // Hub runtime diagnostics may be logged while the Host environment is prepared; the
+      // assertion is that recovery itself did not report completion.
+      expect(console.info).not.toHaveBeenCalledWith('Desktop profile recovery completed:', expect.anything())
     }
     expect(harness.dialog.showMessageBox).toHaveBeenCalledOnce()
     expect(harness.windows[0]!.urls).toEqual(['dsh-app://app/'])

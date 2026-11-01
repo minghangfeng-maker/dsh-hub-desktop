@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 2,
+  "source": "sample snapshot for a fresh checkout; replace it with one exported from your own Hub (see HUB-FORK.md)",
+  "note": "Same shape as a Hub-rendered llm-pi-ai fragment minus baseURL/apiKeyEnv (the connector fills in the device's own Hub relay origin and the HUB_MK_HUB credential reference). Model ids are relay route ids (<model>@<channel>), intersected with the device's own GET /v1/models. The ids here are examples: no key, token, or endpoint lives in this file.",
+  "llmPiAi": {
+    "providers": {
+      "hub-max": {
+        "displayName": "DSH Hub",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "example-provider/deepseek-v4.1-flash@relay",
+            "name": "DeepSeek V4.1 Flash · relay",
+            "contextWindow": 1000000,
+            "maxTokens": 384000,
+            "input": [
+              "text",
+              "image"
+            ],
+            "compat": {
+              "supportsDeveloperRole": false,
+              "requiresReasoningContentOnAssistantMessages": true
+            },
+            "reasoningEfforts": {
+              "low": "low",
+              "high": "high",
+              "max": "max"
+            }
+          },
+          {
+            "id": "deepseek-v4.1-flash@relay",
+            "name": "DeepSeek V4.1 Flash · relay",
+            "contextWindow": 1000000,
+            "maxTokens": 384000,
+            "input": [
+              "text",
+              "image"
+            ],
+            "compat": {
+              "supportsDeveloperRole": false,
+              "requiresReasoningContentOnAssistantMessages": true
+            },
+            "reasoningEfforts": {
+              "low": "low",
+              "high": "high",
+              "max": "max"
+            }
+          }
+        ],
+        "reasoning": "max"
+      },
+      "hub": {
+        "displayName": "DSH Hub",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "Qwen/Qwen3.8-Flash-Next@modelscope",
+            "name": "Qwen/Qwen3.8-Flash-Next · modelscope"
+          },
+          {
+            "id": "kimi-k3-1@relay",
+            "name": "Kimi-K3 · relay",
+            "contextWindow": 1000000,
+            "maxTokens": 32000,
+            "input": [
+              "text",
+              "image"
+            ]
+          }
+        ]
+      },
+      "hub-high": {
+        "displayName": "DSH Hub",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "glm-5.3@relay",
+            "name": "GLM-5.3 · relay",
+            "contextWindow": 1000000,
+            "maxTokens": 64000,
+            "input": [
+              "text",
+              "image"
+            ],
+            "reasoningEfforts": {
+              "low": "low",
+              "high": "high",
+              "max": "max"
+            }
+          },
+          {
+            "id": "glm-5.3-flash@relay",
+            "name": "GLM-5.3-Flash · relay",
+            "contextWindow": 1000000,
+            "maxTokens": 131072,
+            "input": [
+              "text"
+            ],
+            "reasoningEfforts": {
+              "low": "low",
+              "high": "high",
+              "max": "max"
+            }
+          }
+        ],
+        "reasoning": "high"
+      },
+      "hub-xhigh": {
+        "displayName": "DSH Hub",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "Qwen/Qwen3.8-27B@modelscope",
+            "name": "Qwen: Qwen3.8 27B · modelscope",
+            "contextWindow": 1000000,
+            "maxTokens": 131072,
+            "input": [
+              "text",
+              "image"
+            ],
+            "reasoningEfforts": {
+              "false": null,
+              "low": "low",
+              "medium": "medium",
+              "xhigh": "xhigh"
+            }
+          }
+        ],
+        "reasoning": "xhigh"
+      }
+    }
+  },
+  "agentDefaultModel": {
+    "provider": "hub-max",
+    "model": "deepseek-v4.1-flash@relay",
+    "reasoningEffort": "max"
+  }
+}

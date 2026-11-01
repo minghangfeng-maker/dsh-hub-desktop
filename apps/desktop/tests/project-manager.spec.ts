@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -328,5 +328,55 @@ describe('desktop link-backend projections', () => {
     expect(existsSync(join(profile, '.dsh-module-fallback'))).toBe(false)
     expect(lstatSync(join(profile, 'node_modules', 'bridge'), { throwIfNoEntry: false })).toBeUndefined()
     expect(existsSync(join(target, 'package.json'))).toBe(true)
+  })
+})
+
+describe('bundled Hub plugins and the Hub overlay', () => {
+  /** Packaged `resources/runtime/hub-plugins` carrying the connector fixture. */
+  function hubPluginSource(root: string): string {
+    const directory = join(root, 'resources', 'hub-plugins')
+    mkdirSync(directory, { recursive: true })
+    const file = 'dsh-hub-hub-connector-0.0.1.tgz'
+    copyFileSync(join(import.meta.dirname, 'fixtures', 'hub-connector-0.0.1.tgz'), join(directory, file))
+    writeFileSync(join(directory, 'hub-plugins.json'), JSON.stringify({
+      schemaVersion: 1, plugins: [{ name: '@dsh-hub/hub-connector', version: '0.0.1', file }],
+    }))
+    return directory
+  }
+  function setupWithHub(): DesktopProjectManager {
+    const root = temporaryRoot()
+    const dsh = join(root, 'resources', 'dsh')
+    runtimeFixture(dsh)
+    return new DesktopProjectManager(resolveDesktopPaths(join(root, '.dsh')), { dsh, hubPlugins: hubPluginSource(root) })
+  }
+  function bundles(manager: DesktopProjectManager): string[] {
+    return (JSON.parse(readFileSync(join(manager.paths.profile, 'package.json'), 'utf8')) as {
+      dsh: { profile: { bundles: string[] } }
+    }).dsh.profile.bundles
+  }
+
+  it('activates the bundled connector and seeds the overlay on preparation', async () => {
+    const manager = setupWithHub()
+    await manager.applyRelease()
+    expect(bundles(manager)).toContain('@dsh-hub/hub-connector')
+    expect(existsSync(join(manager.paths.profile, 'node_modules', '@dsh-hub', 'hub-connector', 'index.js'))).toBe(true)
+    expect(existsSync(join(manager.paths.profile, 'cordis.hub.patch.yml'))).toBe(true)
+    await manager.applyRelease()
+    expect(bundles(manager).filter(name => name === '@dsh-hub/hub-connector')).toHaveLength(1)
+  })
+
+  it('keeps the connector bundle enabled and the overlay in place during recovery', async () => {
+    const manager = setupWithHub()
+    await manager.applyRelease()
+    const overlay = join(manager.paths.profile, 'cordis.hub.patch.yml')
+    const contents = readFileSync(overlay, 'utf8')
+    writeFileSync(join(manager.paths.profile, 'cordis.patch.yml'), ': broken')
+    await manager.disableAllPlugins()
+    // Recovery resets user-installed plugins but never the connector that ships with the installer.
+    expect(bundles(manager)).toContain('@dsh-hub/hub-connector')
+    expect(bundles(manager)).toContain('@deepseek-ai/dsh-web-app')
+    expect(readFileSync(overlay, 'utf8')).toBe(contents)
+    await manager.applyRelease()
+    expect(bundles(manager)).toContain('@dsh-hub/hub-connector')
   })
 })

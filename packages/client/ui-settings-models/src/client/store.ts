@@ -33,6 +33,8 @@ export interface ProviderDirectoryEntry {
   readonly defaultBaseURL?: string
   readonly baseURLEnv?: readonly string[]
   readonly nativeAuth?: LlmNativeAuth
+  /** Another owner supplies this route (the desktop Hub); it is shown, not edited. */
+  readonly managed?: boolean
   readonly error?: string
 }
 
@@ -58,6 +60,7 @@ export function joinProviderDirectory(
     ...entry.defaultBaseURL === undefined ? {} : { defaultBaseURL: entry.defaultBaseURL },
     ...entry.baseURLEnv === undefined ? {} : { baseURLEnv: entry.baseURLEnv },
     ...entry.nativeAuth === undefined ? {} : { nativeAuth: entry.nativeAuth },
+    ...entry.managed === undefined ? {} : { managed: entry.managed },
     ...entry.error === undefined ? {} : { error: entry.error },
   }))
   for (const provider of registered) {
@@ -250,8 +253,11 @@ export class ModelsSettingsStore {
     const namespaces = new Map(views.map(view => [view.ns, view]))
     const rows: ProviderRow[] = providers.map((entry) => {
       const namespace = namespaces.get(entry.settingsNs)
-      const configured = namespace !== undefined
-        && (entry.settingsPath.length === 0 || this.schema.getPath(namespace.value, entry.settingsPath) !== undefined)
+      // A managed route is configured by its owner, not by this page's namespace:
+      // its profile never appears in the user's section, and reading that absence
+      // as "not configured" would offer it as a provider to add.
+      const configured = entry.managed === true || (namespace !== undefined
+        && (entry.settingsPath.length === 0 || this.schema.getPath(namespace.value, entry.settingsPath) !== undefined))
       const removable = namespace !== undefined
         && entry.settingsPath.length > 0
         && this.schema.hasPath(namespace.user, entry.settingsPath)

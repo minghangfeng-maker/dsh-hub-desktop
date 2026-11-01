@@ -2,6 +2,8 @@
 
 [English](README.md) | 中文
 
+> **非官方第三方构建：DSH Hub。** 本仓库是 DeepSeek Harness 0.2.1-rc.5 的桌面端 fork，以 **DSH Hub** 名义发布；与深度求索公司无关，也未获其认可或赞助。[HUB-FORK.md](HUB-FORK.md) 说明本 fork 改了什么、如何构建 Windows 安装包与免安装包，以及如何把构建指向你自己的 Hub。
+
 DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
 
 它构建于**一切皆插件**的架构之上，由 [Cordis](https://github.com/cordiverse/cordis) 驱动，其设计参见论文 [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512)。

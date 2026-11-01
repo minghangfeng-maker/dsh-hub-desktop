@@ -3,4 +3,5 @@ DeepSeek Harness
 登录已超时
 重新登录
 添加 API Key
+Powered by xdedmi
 请重新登录后继续操作

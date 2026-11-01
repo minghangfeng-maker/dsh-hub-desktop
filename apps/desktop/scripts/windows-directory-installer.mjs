@@ -2,6 +2,7 @@
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
+import { payloadSevenZipPath } from '../hub/nsis-cross-package.mjs'
 
 const require = createRequire(import.meta.url)
 const templates = join(dirname(require.resolve('app-builder-lib/package.json')), 'templates/nsis')
@@ -57,7 +58,6 @@ export function installWindowsDirectoryInstaller() {
   // The package entry initializes the platform classes before their mutually dependent leaves.
   require('app-builder-lib')
   const { NsisTarget } = require('app-builder-lib/out/targets/nsis/NsisTarget.js')
-  const { getPath7za } = require('app-builder-lib/out/toolsets/7zip.js')
   const prototype = NsisTarget.prototype
   if (prototype[patched]) return
   prototype[patched] = true
@@ -67,7 +67,8 @@ export function installWindowsDirectoryInstaller() {
     await mkdir(directory, { recursive: true })
     const section = join(directory, 'installSection.nsh')
     await writeFile(section, directoryInstallSection(await readFile(join(templates, 'installSection.nsh'), 'utf8')))
-    const sourceTool = await getPath7za()
+    // The embedded extractor runs on the target machine, so a cross build embeds the Windows tool.
+    const sourceTool = await payloadSevenZipPath()
     const tool = join(directory, '7za.exe')
     await copyFile(sourceTool, tool)
     await this.packager.signIf(tool)

@@ -31,6 +31,8 @@ import { DesktopOnboardingEntry, type DesktopOnboardingInjected } from './Deskto
 import { readOnboardingApiKeyPresence } from './onboarding-credentials.ts'
 import { refreshAfterReturn } from './account-refresh.ts'
 import { AccountAvatarLoader } from './account-avatar.ts'
+import { HubRestartWatcher } from './hub-restart.ts'
+import { HubChannelWatcher } from './hub-channel.ts'
 export type { AccountSectionInjected, AccountSectionProps } from './AccountSection.tsx'
 export type { AccountMenuProps } from './AccountMenu.tsx'
 export type { AccountSnapshot } from './AccountSection.tsx'
@@ -51,12 +53,28 @@ export function apply(ctx: Context): void {
   const config = ContactConfig(page[CONTACT_CONFIG_GLOBAL] ?? {})
   let snapshot: AccountSnapshot = {
     view: undefined, details: undefined, avatar: undefined, failed: false, loginVisible: false, desktopOnboardingVisible: desktop,
+    hubRestartPending: false, hubChannel: undefined,
   }
   // Desktop main opens the authorization page natively; a plain browser opens it in a tab it owns.
   const browser = new BrowserLogin(url => authorizeUrlWithTheme(url, ctx.theme.getTheme().active.colorScheme))
   ctx.effect(() => () => { browser.dispose() }, 'account: pending browser window')
   const listeners = new Set<() => void>()
   const publish = (value: AccountSnapshot) => { snapshot = value; for (const listener of listeners) listener() }
+  // Desktop only: the Hub connector records that its configuration only takes effect at
+  // the next start, and the shell performs the restart. A plain browser has no connector.
+  const hubRestart = desktop
+    ? new HubRestartWatcher((pending) => { publish({ ...snapshot, hubRestartPending: pending }) })
+    : undefined
+  ctx.effect(() => () => { hubRestart?.dispose() }, 'account: Hub restart notice')
+  hubRestart?.start()
+  // Desktop only: the local phone-access switch lives in the Hub connector. A plain
+  // browser answers 404 and the row disappears instead of polling a route that
+  // cannot exist there.
+  const hubChannel = desktop
+    ? new HubChannelWatcher((channel) => { publish({ ...snapshot, hubChannel: channel }) })
+    : undefined
+  ctx.effect(() => () => { hubChannel?.dispose() }, 'account: phone channel')
+  hubChannel?.start()
   const avatar = new AccountAvatarLoader((value) => { publish({ ...snapshot, avatar: value }) })
   ctx.effect(() => () => { avatar.dispose() }, 'account: profile picture lifetime')
   /** @returns the client identity for one account call, read at call time so it carries the language and zone in effect then. */
@@ -250,6 +268,15 @@ export function apply(ctx: Context): void {
       const result = await ctx.remote.account.signOut(client())
       if (result.ok) return
       throw result.error
+    },
+    async restartHub() {
+      if (hubRestart === undefined) throw new Error('account: no Hub connector')
+      if (!await hubRestart.requestRestart()) throw new Error('account: restart request refused')
+    },
+    ...hubChannel === undefined ? {} : {
+      async setHubChannel(enabled: boolean) {
+        await hubChannel.setEnabled(enabled)
+      },
     },
   }
   if (desktop) {

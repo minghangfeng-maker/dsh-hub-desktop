@@ -10,11 +10,13 @@ export const WELCOME_IPC = {
   analytics: 'dsh-welcome:analytics',
   analyticsEnabled: 'dsh-welcome:analytics-enabled',
   skip: 'dsh-welcome:skip',
+  offline: 'dsh-welcome:offline',
   start: 'dsh-welcome:start',
   cancel: 'dsh-welcome:cancel',
   copyLink: 'dsh-welcome:copy-link',
   state: 'dsh-welcome:state',
   takeNotice: 'dsh-welcome:take-notice',
+  allowApiKey: 'dsh-welcome:allow-api-key',
 } as const
 
 /** Credential writes return a safe outcome without exposing Host diagnostics. */
@@ -29,6 +31,8 @@ type WelcomeEventName = 'auth_page_view' | 'auth_page_click' | 'api_key_save_cli
 export interface WelcomeOperations {
   /** @param eventName - allowed welcome event. @param attributes - approved fields without credentials. */
   analytics?<K extends WelcomeEventName>(eventName: K, attributes: ProductEventMap[K]): Promise<void>
+  /** Whether the official provider's API-key entry is available (the advanced switch). */
+  readonly allowApiKey: boolean
   /** @returns the Host's current effective collection policy. */
   analyticsEnabled(): Promise<boolean>
   /** @returns the pending notification, clearing it before another renderer can receive it. */
@@ -51,10 +55,26 @@ export interface WelcomeOperations {
    * @returns completion after the workspace opens.
    */
   skip(): Promise<void>
+  /**
+   * Enter the workspace without a Hub account and remember that choice for later launches.
+   *
+   * The workspace keeps the local Harness profile, so the user configures models and
+   * plugins themselves; Settings → Account still offers the Hub sign-in afterwards.
+   * @returns completion after the workspace opens.
+   */
+  enterOffline(): Promise<void>
 }
 
 /** The renderer receives localized copy, login operations, and safe account snapshots. */
 export type WelcomeApi = DesktopLocale & WelcomeOperations & {
+  /**
+   * Whether this build offers the official provider's API-key path.
+   *
+   * A DSH Hub desktop signs in to the Hub; the upstream provider's key entry is an
+   * advanced alternative the account page enables, so the renderer receives this
+   * as a plain fact instead of asking for it mid-render.
+   */
+  readonly allowApiKey: boolean
   /** @param listener - safe account snapshot recipient. @returns subscription disposer. */
   onAccountState(listener: (state: AccountView) => void): () => void
 }

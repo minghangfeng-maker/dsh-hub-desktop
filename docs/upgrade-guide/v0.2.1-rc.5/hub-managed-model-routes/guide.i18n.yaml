@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-rc.5/hub-managed-model-routes/guide.md
+/:
+  en: a207b1452793c506
+  zh: fd1bf5fda3d0e299
+/hub-model-routes-leave-cordis-hub-patch-yml:
+  en: c0f5d3e65890084a
+  zh: b929b912dd566eac
+/hub-model-routes-leave-cordis-hub-patch-yml/change:
+  en: 361dac4f0b329279
+  zh: 9a14231c6e21964b
+/hub-model-routes-leave-cordis-hub-patch-yml/migration:
+  en: 87127bab1ef0d958
+  zh: c4c74f7eb178f875

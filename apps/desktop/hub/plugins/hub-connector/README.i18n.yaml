@@ -1,0 +1,28 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write apps/desktop/hub/plugins/hub-connector/README.md
+/dsh-hub-hub-connector:
+  en: f2758b8a2e1f4855
+  zh: a08c5d416b1db694
+/dsh-hub-hub-connector/startup-order:
+  en: 4758faafb36eb2ce
+  zh: 0a2e06c478598f13
+/dsh-hub-hub-connector/hub-model-routes:
+  en: 1d34fa73eb669fba
+  zh: 0b0c3af41657c99f
+/dsh-hub-hub-connector/restart-notice:
+  en: 21f8350dc2373f6a
+  zh: dc3c1b51298a4108
+/dsh-hub-hub-connector/phone-access:
+  en: 641b31e6466e9050
+  zh: 95a17035f37db991
+/dsh-hub-hub-connector/bundled-plugins:
+  en: a2c5fcc6336328d9
+  zh: b2af9f8d6af38c5b
+/dsh-hub-hub-connector/bundled-model-snapshot:
+  en: 5f2f329e090e797e
+  zh: 06f3048c695699b4
+/dsh-hub-hub-connector/files-the-connector-owns:
+  en: c7c9f69f9bc62286
+  zh: 55a3aae24b3a5b93

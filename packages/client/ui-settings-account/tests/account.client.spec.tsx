@@ -25,12 +25,13 @@ const themeOf = (colorScheme: 'light' | 'dark'): ThemeSnapshot => ({
 })
 
 function operationsOf(state: Omit<AccountView, 'links'>, details?: Partial<AccountDetails>, pages?: PlatformPages,
-  avatar?: AccountAvatarSnapshot): AccountSectionInjected {
+  avatar?: AccountAvatarSnapshot, hubRestartPending = false): AccountSectionInjected {
   return {
     ...pages === undefined ? {} : { openPlatformPage: pages.open },
+    restartHub: vi.fn(() => Promise.resolve()),
     hooks: {
       account: {
-        getSnapshot: () => ({ view: { ...state, links: { usageUrl: 'http://localhost:8081/usage', topUpUrl: 'http://localhost:8081/top_up' } }, details, avatar, failed: false }),
+        getSnapshot: () => ({ view: { ...state, links: { usageUrl: 'http://localhost:8081/usage', topUpUrl: 'http://localhost:8081/top_up' } }, details, avatar, failed: false, hubRestartPending }),
         subscribe: () => () => {},
       },
       theme: { getSnapshot: () => themeOf('light'), subscribe: () => () => {} },
@@ -45,9 +46,9 @@ function operationsOf(state: Omit<AccountView, 'links'>, details?: Partial<Accou
 }
 
 function mount(state: Omit<AccountView, 'links'>, copy: typeof en | typeof zh = en, details?: Partial<AccountDetails>,
-  platform?: PlatformBridge, avatar?: AccountAvatarSnapshot) {
+  platform?: PlatformBridge, avatar?: AccountAvatarSnapshot, hubRestartPending = false) {
   const pages = platform === undefined ? undefined : createPlatformPages()
-  const operations = operationsOf(state, details, pages, avatar)
+  const operations = operationsOf(state, details, pages, avatar, hubRestartPending)
   // AccountSection consumes no global hooks; the slot supplies them in the application.
   const globals = {} as GlobalStandardProps
   render(<>
@@ -108,6 +109,7 @@ it.each([en, zh])('renders account cards without inventing profile or balance da
   expect(screen.getByRole('link', { name: copy.usage }).getAttribute('href')).toBe('http://localhost:8081/usage')
   expect(screen.getByRole('link', { name: copy.topUp }).getAttribute('href')).toBe('http://localhost:8081/top_up')
   expect(screen.queryByRole('button', { name: copy.signOut })).toBeNull()
+  expect(screen.getByText(copy.poweredBy)).toBeTruthy()
   expect(document.body.textContent).not.toContain('209.00')
   await expect(`${screen.getByRole('region').textContent}\n`).toMatchFileSnapshot(`./expected/account-${copy === en ? 'en' : 'zh'}.txt`)
 })
@@ -264,6 +266,7 @@ it.each([en, zh])('renders Platform profile and recharge wallet balances', async
 it.each([en, zh])('shows the signed-out settings prompt without balance or Platform links', async (copy) => {
   mount({ status: 'signed-out', attempt: null }, copy)
   expect(screen.getByText(copy.settingsSignedOutTitle)).toBeTruthy()
+  expect(screen.getByText(copy.poweredBy)).toBeTruthy()
   expect(screen.getByText(copy.settingsSignedOutDescription)).toBeTruthy()
   expect(screen.queryByText(copy.balance)).toBeNull()
   expect(screen.queryByRole('link')).toBeNull()
@@ -729,4 +732,17 @@ it.each(['desktopOnboardingVisible', 'onboarding'] as const)('defers bonus displ
   reopened.rerender(await accountMenu(operations, () => snapshot, false))
   await vi.waitFor(() => { expect(operations.bonusNoticeShown).toHaveBeenCalledExactlyOnceWith(notice.orderId) })
   expect(screen.getByText(notice.message)).toBeTruthy()
+})
+
+it('offers the pending Hub restart from the account card and asks the shell for it', async () => {
+  const operations = mount({ status: 'credential-stored', attempt: null }, en, undefined, undefined, undefined, true)
+  expect(screen.getByText(en.hubRestartPending)).toBeTruthy()
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.hubRestartNow })) })
+  expect(operations.restartHub).toHaveBeenCalledOnce()
+})
+
+it('keeps the account card free of a restart row while no Hub restart is pending', () => {
+  mount({ status: 'credential-stored', attempt: null })
+  expect(screen.queryByText(en.hubRestartPending)).toBeNull()
+  expect(screen.queryByRole('button', { name: en.hubRestartNow })).toBeNull()
 })

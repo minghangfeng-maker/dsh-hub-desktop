@@ -2,6 +2,7 @@ import type { ProductEventMap, ProductEvent } from '@deepseek-ai/dsh-client-prod
 import { WINDOWS_TITLEBAR_HEIGHT } from './windows-layout.ts'
 /** Electron shell: desktop project ownership, custom protocol, windows, and lifecycle. */
 
+import { readFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -41,6 +42,7 @@ import { DesktopFatalRecovery } from './fatal-recovery.ts'
 import { pruneCrashReports, RendererConsoleTail, writeCrashReport, type CrashReportSource } from './crash-report.ts'
 import { openWelcomeWindow } from './welcome-window.ts'
 import { WELCOME_IPC, needsWelcome, type WelcomeNotice } from './welcome-api.ts'
+import { captureWindow } from './capture.ts'
 import { connectDesktopWelcome, type DesktopWelcomeBackend } from './welcome-backend.ts'
 import { DesktopUpdateJournal } from './update-journal.ts'
 import { DesktopUpdatePreparationError } from './update-error.ts'
@@ -50,9 +52,9 @@ import { desktopErrorState } from './startup-error.ts'
 import { readDesktopLoginShellEnvironment, resolveDesktopLoginShellConfig } from './login-shell-environment.ts'
 import { DesktopMandatoryUpdatePolicy, resolveDesktopPolicyConfig, type DesktopPolicyState } from './mandatory-update-policy.ts'
 import { desktopClientMetadata, desktopClientVersion } from './client-metadata.ts'
-import { DesktopMandatoryUpdateWindow } from './mandatory-update-window.ts'
+import { DesktopMandatoryUpdateWindow, type MandatoryUpdateView } from './mandatory-update-window.ts'
 import { DesktopPolicyTestAuth } from './policy-test-auth.ts'
-import { readDesktopSettings } from './settings.ts'
+import { readDesktopSettings, writeDesktopSettings } from './settings.ts'
 import { DesktopUpdateDialog, type UpdateDialogOptions } from './update-dialog.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
 import { DesktopBrowserGuests } from './browser-guests.ts'
@@ -61,6 +63,16 @@ import { DesktopUpdateOverlays } from './update-overlay.ts'
 import { DesktopQuitConfirmation } from './quit-confirmation.ts'
 import { DesktopTray } from './tray.ts'
 import { DesktopBackgroundNotice } from './background-notice.ts'
+import { DesktopHubRestartWatcher } from './hub-restart.ts'
+import { DESKTOP_BRANDING } from './branding.ts'
+import { MANDATORY_IPC } from './mandatory-update-ipc.ts'
+import {
+  composeHubHostEnvironment, pipConfigurationPresent, resolveHubRuntimeLayout,
+  verifyBundledPwsh, hubProxyEnvironment, proxyProbeOrigin,
+} from './hub-environment.ts'
+import type { ProxyEnvironment } from './windows-proxy.ts'
+import { readHubOverlaySettings } from './hub-overlay.ts'
+import { resolveAutoProxy, readWindowsSystemProxy } from './windows-proxy-registry.ts'
 
 let focusPrimaryWindow = (): void => {}
 let stopForRecovery = async (): Promise<void> => {}
@@ -70,6 +82,12 @@ let shuttingDown = false
  * development restart command. The installer handoff has its own before-quit branch.
  */
 let skipQuitConfirmation = false
+/**
+ * When this application run started: the Hub connector's restart records are
+ * timestamped, so one written before this instant belongs to an earlier run whose
+ * next start already composed the overlay it asked for.
+ */
+const runStartedAt = new Date().toISOString()
 let windowsLanguage: string | undefined
 /**
  * Whether the backend has reached ready: false until the first ready, back to
@@ -79,6 +97,10 @@ let windowsLanguage: string | undefined
 let backendReady = false
 /** Error-level console output of the primary window, attached to crash reports. */
 const rendererConsole = new RendererConsoleTail()
+
+// Hub build: Electron derives app.name, and therefore the userData directory, from the packaged
+// manifest; set it before any path resolves so both follow hub/branding.mjs.
+app.setName(DESKTOP_BRANDING.userDataDirectoryName)
 
 // Platform-conventional logs directory (macOS ~/Library/Logs/<name>, otherwise under userData);
 // set before ready so the first fatal report already resolves under it.
@@ -148,6 +170,8 @@ interface RuntimeResources {
   readonly node: string
   readonly pnpm: string
   readonly dsh: string
+  /** Bundled Hub plugin archives; absent when this build carries none. */
+  readonly hubPlugins?: string | undefined
 }
 
 function runtimeResources(): RuntimeResources {
@@ -159,7 +183,10 @@ function runtimeResources(): RuntimeResources {
       : join(process.resourcesPath, 'runtime', 'primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.mjs'))
   const dsh = (development ? process.env.DSH_DESKTOP_DSH_DIR : undefined)
     ?? (development ? join(app.getAppPath(), '.desktop-build', 'development', 'project') : join(app.getAppPath(), 'dsh'))
-  return { node, nodeBin, pnpm, dsh }
+  const hubPlugins = resolveHubRuntimeLayout({
+    packaged: !development, resourcesPath: process.resourcesPath, appPath: app.getAppPath(),
+  }).hubPluginsDirectory
+  return { node, nodeBin, pnpm, dsh, ...hubPlugins === undefined ? {} : { hubPlugins } }
 }
 
 function developmentPrimaryRuntime(): string {
@@ -314,8 +341,43 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
   return window
 }
 
+/**
+ * Whether the operator enabled the official DeepSeek account.
+ *
+ * The connector owns that switch in its own state file; the shell only reads it,
+ * so the welcome window can hide the upstream key entry without asking the Host
+ * (which does not exist yet when the window opens).
+ * @param profile - Desktop profile directory.
+ * @returns true when the advanced switch is on; false for a fresh install.
+ */
+function readDeepSeekLogin(profile: string): boolean {
+  try {
+    const state: unknown = JSON.parse(readFileSync(join(profile, 'desktop-hub', 'state.json'), 'utf8'))
+    const settings = typeof state === 'object' && state !== null ? (state as { settings?: unknown }).settings : undefined
+    return typeof settings === 'object' && settings !== null && (settings as { deepSeekLogin?: unknown }).deepSeekLogin === true
+  } catch {
+    return false
+  }
+}
+
 async function main(): Promise<void> {
-  const desktopSettings = readDesktopSettings(app.getPath('userData'))
+  let desktopSettings = readDesktopSettings(app.getPath('userData'))
+  /**
+   * Remember or forget the user's choice to use the workspace without a Hub account.
+   *
+   * A failed write only loses the preference for the next launch: this launch still enters
+   * the workspace, and the account page remains the way to sign in later.
+   * @param offline - whether the workspace should open without a Hub sign-in.
+   */
+  const setWelcomeOffline = (offline: boolean): void => {
+    if (desktopSettings.welcome.offline === offline) return
+    desktopSettings = { ...desktopSettings, welcome: { offline } }
+    try {
+      writeDesktopSettings(app.getPath('userData'), desktopSettings)
+    } catch (error) {
+      console.warn('desktop settings: could not persist the welcome choice', error)
+    }
+  }
   void pruneCrashReports(app.getPath('logs'))
   const journalDirectory = process.env.DSH_DESKTOP_UPDATE_JOURNAL_DIR
   const updateJournal = journalDirectory === undefined ? undefined : new DesktopUpdateJournal(journalDirectory, app.getVersion())
@@ -337,8 +399,65 @@ async function main(): Promise<void> {
     for (const failure of result.failures) console.warn(`desktop login shell: ${failure.shell} failed (${failure.reason})`)
     return result.environment
   })
+  // Hub build: bundled runtimes and the machine's system proxy are discovered once and
+  // composed into the environment every Host and agent shell inherits.
+  const hubLayout = resolveHubRuntimeLayout({
+    packaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath(),
+  })
+  const hubDiscovery = (async () => {
+    const runtimeDiagnostics: string[] = []
+    let pwshVerified = false
+    const pwsh = hubLayout.pwsh
+    if (pwsh !== undefined) {
+      const check = await verifyBundledPwsh(join(pwsh.directory, 'pwsh.exe'), pwsh.version)
+      pwshVerified = check.ok
+      runtimeDiagnostics.push(`desktop runtime: ${check.detail}`)
+    }
+    let proxy: ProxyEnvironment | undefined
+    if (process.platform === 'win32') {
+      const discovery = await readWindowsSystemProxy()
+      const settings = discovery.settings
+      let resolvedProxy: { http?: string; https?: string } | undefined
+      const resolutionDiagnostics: string[] = []
+      if (settings !== undefined && (settings.autoConfigUrl !== '' || settings.autoDetect)) {
+        // A PAC is JavaScript: Chromium resolves it and the shell only reads the answer.
+        const resolution = await resolveAutoProxy({
+          needsResolution: true,
+          probeOrigin: proxyProbeOrigin(DESKTOP_BRANDING.hubOrigin),
+          resolve: url => session.defaultSession.resolveProxy(url),
+        })
+        resolutionDiagnostics.push(...resolution.diagnostics)
+        resolvedProxy = { ...resolution.http === undefined ? {} : { http: resolution.http },
+          ...resolution.https === undefined ? {} : { https: resolution.https } }
+      }
+      const composed = hubProxyEnvironment({ proxy: settings, resolvedProxy, pipConfigPresent: false })
+      proxy = { ...composed, diagnostics: [...discovery.diagnostics, ...resolutionDiagnostics, ...composed.diagnostics] }
+    }
+    return { pwshVerified, proxy, pipConfigPresent: pipConfigurationPresent(process.env), runtimeDiagnostics }
+  })()
   let hostEnvironment: NodeJS.ProcessEnv = process.env
-  const prepareHostEnvironment = async (): Promise<void> => { hostEnvironment = await loginShell }
+  let reportedHubEnvironment = false
+  const prepareHostEnvironment = async (): Promise<void> => {
+    const discovery = await hubDiscovery
+    const hubOverlay = readHubOverlaySettings(activeProject)
+    const composed = composeHubHostEnvironment({
+      base: await loginShell,
+      platform: process.platform,
+      layout: hubLayout,
+      pwshVerified: discovery.pwshVerified,
+      pythonUtf8: desktopSettings.runtime.pythonUtf8,
+      proxy: discovery.proxy,
+      proxyOverride: hubOverlay.proxy,
+      pipConfigPresent: discovery.pipConfigPresent,
+    })
+    if (!reportedHubEnvironment) {
+      reportedHubEnvironment = true
+      for (const diagnostic of [...discovery.runtimeDiagnostics, ...hubOverlay.diagnostics, ...composed.diagnostics]) {
+        console.info(diagnostic)
+      }
+    }
+    hostEnvironment = composed.environment
+  }
   let quitting = false
   let startup: Promise<void> | undefined
   let workspaceRecovery: Promise<void> | undefined
@@ -483,6 +602,7 @@ async function main(): Promise<void> {
               return undefined
             }).catch(() => undefined)
           }
+          if (state.status === 'credential-stored' && previousAccountStatus !== 'credential-stored') setWelcomeOffline(false)
           previousAccountStatus = state.status
         }, () => {
           // The stream reconnects; a transport failure does not change account state.
@@ -571,7 +691,10 @@ async function main(): Promise<void> {
     startup ??= (async () => {
       await navigateMain(applicationUrl)
       await backend.start(async () => {
-        await Promise.all([manager.applyRelease(), prepareHostEnvironment()])
+        // Profile preparation owns the Hub overlay, so it settles before the environment
+        // read that consumes the overlay's settings block.
+        await manager.applyRelease()
+        await prepareHostEnvironment()
       })
       if (backend.host !== undefined) await openInitialWindow()
       if (backend.host !== undefined) updateJournal?.action('workspace-ready')
@@ -929,10 +1052,10 @@ async function main(): Promise<void> {
     updates.dispose()
   })
 
-  const applicationIconPath = development ? join(app.getAppPath(), 'resources', 'icon-windows.png')
+  const applicationIconPath = development ? join(app.getAppPath(), DESKTOP_BRANDING.iconPng)
     : join(process.resourcesPath, 'icon.png')
   app.setAboutPanelOptions({
-    applicationName: 'DeepSeek Harness',
+    applicationName: DESKTOP_BRANDING.productName,
     applicationVersion: app.getVersion(),
     // The release has no separate build number; omit Electron's bundle version.
     version: '',
@@ -1012,6 +1135,94 @@ async function main(): Promise<void> {
     // size directly, where the 1024 px PNG would be scaled down by GDI.
     ...(process.platform === 'win32' ? { icon: nativeImage.createFromPath(trayIconPath) } : {}),
   })
+
+  /**
+   * Stop the Host and reopen the application so a Hub overlay takes effect.
+   *
+   * The same shape as the quit confirmation: a task that is actually running is
+   * confirmed first, admitted requests drain through the update lock, and the Host
+   * stops through the ordinary quit path before Electron relaunches.
+   * @param source - Why the restart runs, for the log.
+   */
+  const restartForHub = async (source: 'prompt' | 'request'): Promise<void> => {
+    if (quitting) return
+    console.info(`desktop hub restart: ${source}`)
+    const host = backend.host
+    let activeTasks = false
+    try {
+      activeTasks = (await host?.inspectQuit())?.activeTasks === true
+    } catch (error) {
+      console.warn('desktop hub restart: task inspection unavailable', error)
+    }
+    if (activeTasks) {
+      const { messages } = locale
+      const result = await dialog.showMessageBox({
+        type: 'warning',
+        title: messages.aboutProduct,
+        message: messages.hubRestartActiveTasks,
+        detail: messages.hubRestartReady,
+        buttons: [messages.hubRestartNow, messages.hubRestartLater],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+      })
+      if (result.response !== 0) {
+        console.info('desktop hub restart: deferred by the user')
+        return
+      }
+    }
+    // The lock drains admitted requests; a Host that is already gone needs none of it.
+    try {
+      await host?.updateTasks('lock')
+    } catch (error) {
+      console.warn('desktop hub restart: request drain failed', error)
+    }
+    app.relaunch()
+    quitWithoutConfirmation()
+  }
+
+  /**
+   * Offer the restart the Hub connector recorded.
+   * @param reason - Operator sentence the connector wrote, logged for diagnosis.
+   * @returns Whether the user was actually asked; false retries on the next read.
+   */
+  const offerHubRestart = async (reason: string): Promise<boolean> => {
+    if (quitting || shuttingDown || isMandatory() || updateDialog.isOpen) return false
+    const window = currentDialogWindow()
+    if (window === undefined || window.isDestroyed()) return false
+    console.info(`desktop hub restart: the Hub configuration needs a restart (${reason})`)
+    const { messages } = locale
+    const result = await dialog.showMessageBox({
+      type: 'info',
+      // A native box without an owner also reaches a window hidden in the tray.
+      ...(process.platform === 'win32' ? { icon: nativeImage.createFromPath(trayIconPath) } : {}),
+      title: messages.aboutProduct,
+      // The main instruction is one short line the task dialog never has to fit; the
+      // sentence that names what is ready and what to do is the secondary text, which
+      // wraps.
+      message: messages.hubRestartTitle,
+      detail: messages.hubRestartReady,
+      buttons: [messages.hubRestartNow, messages.hubRestartLater],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    })
+    if (result.response !== 0) {
+      console.info('desktop hub restart: deferred by the user')
+      return true
+    }
+    await restartForHub('prompt')
+    return true
+  }
+
+  const hubRestart = new DesktopHubRestartWatcher({
+    profile: activeProject,
+    since: runStartedAt,
+    prompt: offerHubRestart,
+    restart: () => restartForHub('request'),
+    onError: (error) => { console.warn('desktop hub restart: watcher failed', error) },
+  })
+  hubRestart.start()
 
   if (process.platform === 'win32') {
     ipcMain.handle(DESKTOP_IPC.windowsMenu, (event, name: unknown, x: unknown, y: unknown) => {
@@ -1125,6 +1336,7 @@ async function main(): Promise<void> {
     if (activate) window.show()
     else window.showInactive()
     enteredWorkspace = true
+    captureWindow(window, 'workspace')
     if (welcomeWindow !== undefined) {
       welcomeWindow.close()
       window.webContents.send(DESKTOP_IPC.enterWorkspace)
@@ -1146,6 +1358,7 @@ async function main(): Promise<void> {
       if (!welcomeWindow.isVisible()) void track('auth_page_view', {})
       welcomeWindow.show()
       welcomeWindow.focus()
+      captureWindow(welcomeWindow, 'welcome')
       return Promise.resolve()
     }
     openingWelcome ??= (async () => {
@@ -1179,7 +1392,12 @@ async function main(): Promise<void> {
           await enterWorkspace()
           return { ok: true }
         },
+        allowApiKey: readDeepSeekLogin(activeProject),
         skip: enterWorkspace,
+        enterOffline: async () => {
+          setWelcomeOffline(true)
+          await enterWorkspace()
+        },
       })
       const window = welcomeWindow
       window.once('closed', () => {
@@ -1198,6 +1416,7 @@ async function main(): Promise<void> {
       })
       if (isQuitting() || recovery.active || enteredWorkspace) window.close()
       else mainWindow?.hide()
+      captureWindow(window, 'welcome')
     })().finally(() => { openingWelcome = undefined })
     return openingWelcome
   }
@@ -1208,7 +1427,7 @@ async function main(): Promise<void> {
     locale = resolveDesktopStartupLocale(state.localePreference, systemLanguages)
     windowsLanguage = locale.id
     refreshApplicationMenu()
-    if (!enteredWorkspace && needsWelcome({ loggedIn: state.loggedIn, hasApiKey: state.hasApiKey })) {
+    if (!enteredWorkspace && !desktopSettings.welcome.offline && needsWelcome({ loggedIn: state.loggedIn, hasApiKey: state.hasApiKey })) {
       // A later login must retain its own activation policy instead of replaying startup focus.
       raiseAfterUpdate = false
       await showWelcome()
@@ -1249,6 +1468,7 @@ async function main(): Promise<void> {
     quitting = true
     shuttingDown = true
     updateJournal?.action('quit-requested')
+    hubRestart.stop()
     quitConfirmation.dispose()
     backgroundNotice?.dispose()
     tray?.dispose()
@@ -1294,6 +1514,14 @@ async function main(): Promise<void> {
     ? ('dshMandatoryUpdatePolicy' in manifest ? manifest.dshMandatoryUpdatePolicy : undefined)
     : developmentPolicy === undefined ? undefined : JSON.parse(developmentPolicy) as unknown
   const policyConfig = resolveDesktopPolicyConfig(policyInput, !app.isPackaged)
+  // Hub build: a build without policy metadata has no mandatory-update window, but the
+  // Windows preload still asks for the policy state on every main-frame load. Answering
+  // with the idle view keeps that probe working instead of logging a missing handler.
+  if (policyConfig === undefined) {
+    ipcMain.handle(MANDATORY_IPC.status, (): MandatoryUpdateView => ({
+      locale, policy: { blocking: false, checking: false }, update: updateState, deferred: false,
+    }))
+  }
   if (policyConfig !== undefined) {
     if (policyConfig.authentication === 'feishu-test') {
       policyAuth = new DesktopPolicyTestAuth(policyConfig.origin, policyConfig.allowedAuthOrigins, locale,

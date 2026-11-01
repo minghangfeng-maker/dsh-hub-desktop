@@ -39,6 +39,8 @@ const state = vi.hoisted(() => ({
   menu: vi.fn(),
   operations: undefined as WelcomeOperations | undefined,
   nativeTheme: { themeSource: 'system', shouldUseDarkColors: false },
+  offline: false,
+  persistedOffline: [] as boolean[],
 }))
 
 vi.mock('../src/crash-report.ts', async importOriginal => ({
@@ -51,6 +53,7 @@ vi.mock('electron', () => ({
   app: {
     isPackaged: false,
     name: 'Harness',
+    setName: vi.fn(),
     requestSingleInstanceLock: () => true,
     setAsDefaultProtocolClient: vi.fn(),
     whenReady: () => Promise.resolve(),
@@ -102,7 +105,16 @@ vi.mock('electron', () => ({
 vi.mock('../src/tray.ts', () => ({ DesktopTray: class { relabel() {} dispose() {} } }))
 
 vi.mock('../src/paths.ts', () => ({ resolveDesktopPaths: () => ({ profile: '/profile' }) }))
-vi.mock('../src/settings.ts', () => ({ readDesktopSettings: () => ({ updates: { allowTestAuthPopupWindow: false } }) }))
+vi.mock('../src/settings.ts', () => ({
+  readDesktopSettings: () => ({
+    updates: { allowTestAuthPopupWindow: false },
+    welcome: { offline: state.offline },
+    runtime: { pythonUtf8: true },
+  }),
+  writeDesktopSettings: (_userData: string, settings: { welcome: { offline: boolean } }) => {
+    state.persistedOffline.push(settings.welcome.offline)
+  },
+}))
 vi.mock('../src/login-shell-environment.ts', async importOriginal => ({
   ...await importOriginal<typeof import('../src/login-shell-environment.ts')>(),
   readDesktopLoginShellEnvironment: async (base: NodeJS.ProcessEnv) => ({ environment: base, failures: [] }),
@@ -299,4 +311,58 @@ it.each([false, true])('starts welcome onboarding without carrying update focus 
   expect(state.showWorkspace).toHaveBeenCalledOnce()
   expect(state.focusWorkspace).toHaveBeenCalledOnce()
 
+})
+
+/**
+ * Stub the packaged runtime layout shared by the startup cases.
+ * @returns nothing; the caller imports the main module next.
+ */
+function stubPackagedRuntime(): void {
+  vi.useFakeTimers()
+  vi.stubEnv('DSH_CLIENT_VERSION', '1.2.3')
+  vi.stubEnv('DSH_DESKTOP_DEV_PROJECT_DIR', '/development-profile')
+  vi.stubEnv('DSH_DESKTOP_NODE_BINARY', '/runtime/node')
+  vi.stubEnv('DSH_DESKTOP_PNPM_ENTRY', '/runtime/pnpm')
+  vi.stubEnv('DSH_DESKTOP_DSH_DIR', '/runtime/dsh')
+  vi.stubEnv('DSH_DESKTOP_PRIMARY_RUNTIME_DIR', '/runtime/primary-runtime')
+  vi.stubEnv('DSH_DESKTOP_HOST_INSPECT_PORT', undefined)
+  vi.stubEnv('DSH_DESKTOP_OPEN_DEVTOOLS', '0')
+  vi.stubEnv('DSH_DESKTOP_MANDATORY_UPDATE_CONFIG', undefined)
+  vi.stubEnv('DSH_DESKTOP_UPDATE_JOURNAL_DIR', undefined)
+}
+
+it('starts the workspace directly when offline mode was chosen on an earlier launch', async () => {
+  vi.resetModules()
+  vi.clearAllMocks()
+  state.offline = true
+  state.hasApiKey = false
+  state.preference = 'zh'
+  state.operations = undefined
+  state.accountState.mockResolvedValue({ status: 'signed-out', attempt: null, links: { usageUrl: '', topUpUrl: '' } })
+  stubPackagedRuntime()
+  await import('../src/main.ts')
+  await vi.waitFor(() => { expect(state.loadWorkspace).toHaveBeenCalledOnce() })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(state.beforeWelcome).not.toHaveBeenCalled()
+  expect(state.showWorkspace).toHaveBeenCalledOnce()
+  state.offline = false
+})
+
+it('remembers the offline choice and opens the workspace from the welcome entry', async () => {
+  vi.resetModules()
+  vi.clearAllMocks()
+  state.offline = false
+  state.hasApiKey = false
+  state.preference = 'zh'
+  state.operations = undefined
+  state.persistedOffline = []
+  state.accountState.mockResolvedValue({ status: 'signed-out', attempt: null, links: { usageUrl: '', topUpUrl: '' } })
+  stubPackagedRuntime()
+  await import('../src/main.ts')
+  await vi.waitFor(() => { expect(state.beforeWelcome).toHaveBeenCalledOnce() })
+  await vi.waitFor(() => { expect(state.operations).toBeDefined() })
+  await state.operations!.enterOffline()
+  expect(state.persistedOffline).toEqual([true])
+  expect(state.showWorkspace).toHaveBeenCalledOnce()
+  expect(state.closeWelcome).toHaveBeenCalledOnce()
 })

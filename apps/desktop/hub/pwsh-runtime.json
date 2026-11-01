@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "version": "7.6.7",
+  "archive": "PowerShell-7.6.7-win-x64.zip",
+  "origin": "https://github.com/PowerShell/PowerShell/releases/download/v7.6.7/PowerShell-7.6.7-win-x64.zip",
+  "mirrors": [
+    "https://mirrors.tuna.tsinghua.edu.cn/github-release/PowerShell/PowerShell/v7.6.7/{archive}",
+    "https://mirrors.tuna.tsinghua.edu.cn/github-release/PowerShell/PowerShell/LatestRelease/{archive}"
+  ],
+  "sha256": "d2f952ebdbf24386cb8923553aa58e41a846db35a6155ea04c58142a4b16dbb7",
+  "archiveBytes": 106364316,
+  "files": 658,
+  "unpackedBytes": 256691889,
+  "license": "MIT",
+  "supportUntil": "2028-11-14"
+}

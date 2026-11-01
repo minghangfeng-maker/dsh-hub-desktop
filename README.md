@@ -2,6 +2,8 @@
 
 English | [中文](README.zh.md)
 
+> **Unofficial third-party build: DSH Hub.** This repository is a desktop fork of DeepSeek Harness 0.2.1-rc.5 that ships as **DSH Hub**. It is not affiliated with, endorsed by, or sponsored by DeepSeek. [HUB-FORK.md](HUB-FORK.md) lists what the fork changes, how to build the Windows installer and portable package, and how to point a build at your own Hub.
+
 DeepSeek Harness (`dsh`) is an open-source agent harness developed by [DeepSeek AI](https://deepseek.com).
 
 It is built on an **everything-is-a-plugin** architecture and powered by [Cordis](https://github.com/cordiverse/cordis), whose design is described in [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512).

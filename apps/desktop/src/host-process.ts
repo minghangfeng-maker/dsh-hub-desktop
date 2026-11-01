@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { join } from 'node:path'
 import type { PlatformSession } from '@deepseek-ai/dsh-deepseek-account'
 import { desktopNodeEnvironment } from './node-environment.ts'
+import { brandedHostEnvironment } from './branding.ts'
 
 interface ReadyEvent {
   readonly type: 'ready'
@@ -196,7 +197,7 @@ export class DesktopHostProcess {
       ...this.packageManager === undefined ? [] : [this.packageManager.pnpm, this.packageManager.nodeBin],
     ], {
       cwd: this.projectDir,
-      env: desktopNodeEnvironment(this.node, undefined, this.environment),
+      env: desktopNodeEnvironment(this.node, undefined, brandedHostEnvironment(this.environment)),
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     })
     this.child = child

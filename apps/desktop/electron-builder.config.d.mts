@@ -35,6 +35,8 @@ export interface DesktopElectronBuilderConfig {
     readonly writeUpdateInfo: boolean
   }
   readonly win: {
+    /** Multi-size Windows application icon the executable carries. */
+    readonly icon: string
     readonly forceCodeSigning: boolean
     readonly signtoolOptions: {
       readonly publisherName: string | undefined
@@ -43,6 +45,9 @@ export interface DesktopElectronBuilderConfig {
     }
   }
   readonly nsis: {
+    readonly artifactName: string
+    readonly installerSidebar: string
+    readonly uninstallerSidebar: string
     readonly include: string
     readonly oneClick: false
     readonly perMachine: false

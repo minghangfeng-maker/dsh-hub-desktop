@@ -10,6 +10,8 @@ description: "在本地或 Windows／macOS Actions 中生成 Desktop 安装包�
 
 在本地或 Windows／macOS Actions 中生成 Desktop 安装包，选择部署与签名模式，并获取产物和诊断。本指南区分构建操作、发布与已安装应用验收。使用硬件凭据前，必须检查平台签名要求与共享 runner 风险。
 
+Hub 分支完整打包前先阅读 [Windows 打包提速经验](../hub/build-performance.md)。该文记录已测量的 npm 包并行打包流程，以及将它接入 Windows 打包所需的改动。
+
 ## 目录
 
 - [选择打包方式](#choose-a-build)

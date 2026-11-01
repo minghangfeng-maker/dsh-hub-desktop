@@ -10,6 +10,8 @@ English | [中文](README.zh.md)
 
 Build Desktop installers locally or through Windows or macOS Actions, choose deployment and signing mode, and retrieve artifacts and diagnostics. This guide keeps build operations separate from publishing and installed-application qualification. Platform signing details and shared-runner risks must be checked before using hardware credentials.
 
+For the Hub fork, consult the [Windows packaging performance note](../hub/build-performance.md) before a full build. It records the measured parallel npm packing workflow and the integration needed to use it in Windows packaging.
+
 ## Table of Contents
 
 - [Choose a build path](#choose-a-build)

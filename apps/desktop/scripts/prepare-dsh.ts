@@ -44,6 +44,14 @@ const RUNTIME_ROOT = BUILD_PATHS.runtime
 const PNPM_BUILD_STATE = BUILD_PATHS.dshPnpm
 const PACKAGE_SET_ROOT = BUILD_PATHS.packageSet
 const NODE = join(BUILD_PATHS.electron, process.platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron')
+/** Payload this run materializes; a cross-target run builds another platform's tree. */
+const PAYLOAD = desktopTargetPlatform(resolveDesktopBuildTarget())
+/**
+ * Node used to run pnpm while materializing the payload. A cross-target run cannot
+ * execute the target Electron, and package resolution is the only work that depends
+ * on the target platform (through the `--os`/`--cpu` selectors below).
+ */
+const PACKAGE_MANAGER_NODE = PAYLOAD.platform === process.platform ? NODE : process.execPath
 const PNPM = join(RUNTIME_ROOT, 'primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.mjs')
 
 function manifestVersion(path: string, subject: string): string {
@@ -77,13 +85,17 @@ function runPnpm(args: readonly string[]): Promise<void> {
     const userConfig = join(config, 'npmrc')
     mkdirSync(config, { recursive: true })
     writeFileSync(userConfig, '')
-    const child = spawn(NODE, [
+    // Hub build: a cross-target run resolves the payload's platform explicitly, which is what
+    // makes the installed optional dependencies match the target rather than the build host.
+    const crossTarget = PAYLOAD.platform === process.platform ? [] : [`--os=${PAYLOAD.platform}`, `--cpu=${PAYLOAD.arch}`]
+    const child = spawn(PACKAGE_MANAGER_NODE, [
       '--expose-internals',
       PNPM,
       `--config.registry=${registry}`,
       `--config.store-dir=${STORE_ROOT}`,
       '--config.enable-global-virtual-store=false',
       `--config.userconfig=${userConfig}`,
+      ...crossTarget,
       command,
       ...commandArgs,
     ], {
@@ -95,7 +107,7 @@ function runPnpm(args: readonly string[]): Promise<void> {
         NPM_CONFIG_REGISTRY: registry,
         NPM_CONFIG_STORE_DIR: STORE_ROOT,
         NPM_CONFIG_USERCONFIG: userConfig,
-        ...desktopNodeEnvironment(NODE, join(RUNTIME_ROOT, 'bin'), {}),
+        ...desktopNodeEnvironment(PACKAGE_MANAGER_NODE, join(RUNTIME_ROOT, 'bin'), {}),
         PATH: `${join(RUNTIME_ROOT, 'bin')}${delimiter}${process.env.PATH ?? ''}`,
         XDG_CACHE_HOME: join(PNPM_BUILD_STATE, 'cache'),
         XDG_CONFIG_HOME: config,
@@ -111,6 +123,17 @@ function runPnpm(args: readonly string[]): Promise<void> {
   })
 }
 
+/**
+ * Deny koffi's build script in one staged runtime project.
+ * @param projectDir - Staged runtime project carrying its generated pnpm-workspace.yaml.
+ */
+function denyKoffiBuild(projectDir: string): void {
+  const path = join(projectDir, 'pnpm-workspace.yaml')
+  const contents = readFileSync(path, 'utf8')
+  if (!contents.includes('  koffi: true\n')) throw new Error('desktop runtime: staged workspace does not allow koffi as expected')
+  writeFileSync(path, contents.replace('  koffi: true\n', '  koffi: false\n'))
+}
+
 async function main(): Promise<void> {
   try {
     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:reset', async () => {
@@ -123,6 +146,10 @@ async function main(): Promise<void> {
       copyFileSync(join(PACKAGE_SET_ROOT, DESKTOP_PACKAGE_SET_FILE), join(BUILD_ROOT, DESKTOP_PACKAGE_SET_FILE))
       cpSync(join(PACKAGE_SET_ROOT, DESKTOP_PACKAGES_DIR), join(BUILD_ROOT, DESKTOP_PACKAGES_DIR), { recursive: true })
       createRuntimeProjectMetadata(BUILD_ROOT, release)
+      // Hub build: koffi's install script validates the *build host* prebuilt and rebuilds from
+      // source otherwise. A cross run already installed the payload's prebuilt package through
+      // pnpm's --os/--cpu selectors, so deny that script instead of failing on a missing compiler.
+      if (PAYLOAD.platform !== process.platform) denyKoffiBuild(BUILD_ROOT)
       return prepareRuntimePatches(BUILD_ROOT, resolve(APP_ROOT, '..', '..'))
     })
     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:lockfile', () => runPnpm(['install', '--lockfile-only']))
@@ -134,7 +161,7 @@ async function main(): Promise<void> {
     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:install', () => runPnpm(['install', '--prod', '--frozen-lockfile', '--trust-lockfile']))
     const packageSet = readDesktopCorePackageSet(BUILD_ROOT, release.version)
     const targetName = resolveDesktopBuildTarget()
-    const target = { platform: process.platform, arch: desktopTargetPlatform(targetName).arch }
+    const target = desktopTargetPlatform(targetName)
     const modules = join(BUILD_ROOT, 'node_modules')
     const officeManifest = JSON.parse(readFileSync(join(modules, '@deepseek-ai/libreoffice-kit/package.json'), 'utf8'))
     const officeEngine = selectOfficeEngine(officeManifest, target)
@@ -166,7 +193,8 @@ async function main(): Promise<void> {
     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:primary-smoke', async () => smokePrimaryRuntime(join(RUNTIME_ROOT, 'primary-runtime')))
     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:write-descriptor', async () => writeDesktopRuntime(DSH_OUTPUT_ROOT, release, packageSet.packages.map(entry => entry.name), target))
     const descriptor = await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:verify-before-smoke', () => verifyDesktopRuntime(DSH_OUTPUT_ROOT, release.version, target))
-    if (!process.argv.includes('--defer-runtime-smoke')) {
+    // Hub build: the smoke runs the payload's Electron, which a cross-target host cannot execute.
+    if (!process.argv.includes('--defer-runtime-smoke') && target.platform === process.platform) {
       await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:smoke', () => smokePreparedRuntime(DSH_OUTPUT_ROOT, NODE, RUNTIME_ROOT, descriptor))
       await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:verify-after-smoke', () => verifyDesktopRuntime(DSH_OUTPUT_ROOT, release.version, target))
     }

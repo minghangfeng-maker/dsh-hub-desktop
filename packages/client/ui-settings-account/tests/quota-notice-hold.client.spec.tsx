@@ -63,6 +63,7 @@ function sectionOperations(account: AccountSnapshot, pages: PlatformPages): Acco
       theme: { getSnapshot: () => theme, subscribe: () => () => {} },
     },
     openPlatformPage: pages.open,
+    restartHub: vi.fn(async () => {}),
     refreshAccount: async () => {},
     avatarFailed: () => {},
     bonusNoticeShown: () => {}, bonusNoticeDismissed: () => {},

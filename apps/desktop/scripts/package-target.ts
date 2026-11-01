@@ -121,6 +121,18 @@ export function withoutDesktopUploadCredentials(environment: NodeJS.ProcessEnv):
     .filter(([name]) => !DESKTOP_UPLOAD_CREDENTIAL_ENV_NAMES.has(name)))
 }
 
+/**
+ * Whether this run may pack a Windows target on a non-Windows host.
+ *
+ * A cross run cannot compile the NSIS installer helper or execute the payload's
+ * Electron, so it produces only the directory artifact electron-builder can
+ * assemble without Windows. Windows x64 hosts keep the upstream requirements.
+ * @returns true when DSH_HUB_CROSS_PACKAGE=1 opted into the cross-directory build.
+ */
+export function crossPackagingEnabled(): boolean {
+  return process.env.DSH_HUB_CROSS_PACKAGE === '1'
+}
+
 function isTargetName(value: string): value is DesktopPackageTargetName {
   return Object.hasOwn(TARGETS, value)
 }
@@ -177,7 +189,7 @@ export function resolveDesktopPackageTarget(
     throw new Error(`desktop package: unsupported target ${JSON.stringify(name)}; expected ${Object.keys(TARGETS).join(', ')}`)
   }
   const target = TARGETS[name]
-  if (target.platform === 'win32' && (hostPlatform !== 'win32' || hostArch !== 'x64')) {
+  if (target.platform === 'win32' && !crossPackagingEnabled() && (hostPlatform !== 'win32' || hostArch !== 'x64')) {
     throw new Error('desktop package: win-x64 requires a Windows x64 build host')
   }
   if (target.platform === 'darwin' && hostPlatform !== 'darwin') {
@@ -355,7 +367,12 @@ async function main(): Promise<void> {
   environment[DESKTOP_BUILD_VERSION_ENV] = buildVersion
   if (invocation.check) {
     validateDesktopPackageEnvironment(environment, target, invocation)
-    await requireDesktopToolchain(target.platform, environment)
+    // Hub build: a cross-directory run has no Windows installer toolchain to probe.
+    if (target.platform === 'win32' && crossPackagingEnabled()) {
+      process.stdout.write('desktop package: cross-directory build; skipping the Windows installer toolchain probe\n')
+    } else {
+      await requireDesktopToolchain(target.platform, environment)
+    }
     process.stdout.write(`desktop package: ${target.name} would publish ${buildVersion}; local configuration and toolchain valid, signing and notarization were not attempted\n`)
     return
   }
@@ -376,7 +393,14 @@ async function main(): Promise<void> {
   let success = false
   try {
     await packagingStep(run.directory, 'configuration', async () => { validateDesktopPackageEnvironment(environment, target, invocation) }, secrets)
-    await packagingStep(run.directory, 'toolchain', () => requireDesktopToolchain(target.platform, environment), secrets)
+    // Hub build: the Windows toolchain probe (vswhere, VC tools, NSIS) cannot pass off Windows.
+    await packagingStep(run.directory, 'toolchain', async () => {
+      if (target.platform === 'win32' && crossPackagingEnabled()) {
+        process.stdout.write('desktop package: cross-directory build; skipping the Windows installer toolchain probe\n')
+        return
+      }
+      await requireDesktopToolchain(target.platform, environment)
+    }, secrets)
     if (target.platform === 'darwin') {
       const settings = resolveMacOSPackageSettings(environment)
       recordPackagingEvent(run.directory, { type: 'macos-settings', packConcurrency: settings.packConcurrency,
@@ -494,6 +518,9 @@ export async function packageTarget(
     buildPaths.packedLandlock,
   ], buildEnv, REPOSITORY_ROOT)
   await execute(['run', 'prepare:runtime', ...(signPrimaryRuntime ? ['--defer-primary-runtime-smoke'] : [])], downloadEnv)
+  // Hub build: the bundled PowerShell tree and Hub plugin archives live under runtime/,
+  // which prepare:runtime clears, so they are prepared immediately after it.
+  await execute(['run', 'prepare:hub-runtime'], downloadEnv)
   if (signPrimaryRuntime) await execute(['run', 'sign:primary-runtime'], electronBuilderEnv)
   await execute(['run', 'prepare:packages'], targetEnv)
   await execute(['run', 'prepare:dsh', ...(signPrimaryRuntime ? ['--defer-runtime-smoke'] : [])], downloadEnv)
@@ -520,8 +547,13 @@ export async function packageTarget(
       () => notarizeMacOS({ appPath, ...resolveMacOSNotarizationEnvironment(environment) }), undefined, undefined, proxyEvent)
   } else {
     await signedStage('artifacts', () => execute(desktopElectronBuilderArguments(target, invocation.directory), electronBuilderEnv))
-    await execute(['exec', 'tsx', 'scripts/smoke-packaged-runtime.ts',
-      ...(invocation.unsigned ? ['--unsigned'] : []), ...(invocation.skipNotarization ? ['--skip-notarization'] : [])], targetEnv)
+    // Hub build: the packaged smoke runs the payload's Electron, so a cross-target host skips it.
+    if (target.platform === process.platform) {
+      await execute(['exec', 'tsx', 'scripts/smoke-packaged-runtime.ts',
+        ...(invocation.unsigned ? ['--unsigned'] : []), ...(invocation.skipNotarization ? ['--skip-notarization'] : [])], targetEnv)
+    } else {
+      process.stdout.write(`desktop package: skipping the packaged smoke; ${target.platform} cannot run on ${process.platform}\n`)
+    }
   }
   if (!invocation.directory && !invocation.unsigned && !invocation.skipNotarization) {
     writeReleaseRecord(target, electronBuilderEnv, buildPaths.artifacts)

@@ -1,5 +1,6 @@
 /** Launch the Desktop profile through the Web application and report its URL to Electron. */
 
+import { existsSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
 import { inspect } from 'node:util'
 import { loadLayeredEnv, loadProfileDirectory, reportSkippedBundles } from '@deepseek-ai/dsh-app-boot'
@@ -14,6 +15,7 @@ import { installDesktopUpdateTaskControl } from './update-tasks.ts'
 import { installDesktopQuitInspection } from './quit-inspection.ts'
 import { installPlatformSessionPublisher } from './platform-session.ts'
 import { installOfficeEngineResolution } from './office-engine.ts'
+import { HUB_OVERLAY_FILENAME, migrateHubOverlayModels } from './hub-overlay.ts'
 
 async function main(): Promise<void> {
   const runtimeDir = process.argv[2] as string
@@ -22,11 +24,22 @@ async function main(): Promise<void> {
   const installAnchor = join(runtimeDir, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
   const profile = loadProfileDirectory('dsh', projectDir, installAnchor)
   reportSkippedBundles('dsh', profile)
+  // A Hub-managed overlay outranks the profile patch and every bundle layer, so it is
+  // applied last; an absent file means this install has received no Hub configuration.
+  // Model rows move out of it first: the adapter registers those routes itself, and a
+  // row here would make every personal provider edit look overridden.
+  const migrated = migrateHubOverlayModels(projectDir)
+  if (migrated.error !== undefined) {
+    console.error(`desktop host: the Hub overlay was not migrated: ${migrated.error}`)
+  } else if (migrated.migrated) {
+    console.log(`desktop host: moved ${migrated.removed.join(', ')} out of the Hub overlay into the connector's managed model set`)
+  }
+  const hubOverlay = join(projectDir, HUB_OVERLAY_FILENAME)
   const application = runProfile({
     environment: loadLayeredEnv('dsh'),
     profile: 'desktop',
     resolvedProfile: { profile, installAnchor },
-    patchFiles: [],
+    patchFiles: existsSync(hubOverlay) ? [hubOverlay] : [],
     args: ['--no-open', '--host', '127.0.0.1', '--port', '0'],
     ...(process.argv[5] === undefined ? {} : {
       packageManager: {

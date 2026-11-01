@@ -1,0 +1,37 @@
+[
+  {
+    "package": "@local/dsh-memory",
+    "version": "0.1.3",
+    "file": "local-dsh-memory-0.1.3.tgz",
+    "sha256": "57043b47ad5a15a986b3b61e98afdcf6b9de9e5972b0f56fe72890f8115f092d",
+    "level": "default"
+  },
+  {
+    "package": "dsh-better-sidebar",
+    "version": "0.28.0",
+    "file": "dsh-better-sidebar-0.28.0.tgz",
+    "sha256": "cb4adf84cc7505eb4e390e0becc3c942aa099cd46465a9a17708a2c5761f042f",
+    "level": "core"
+  },
+  {
+    "package": "@local/dsh-claude-pilot",
+    "version": "0.6.0",
+    "file": "local-dsh-claude-pilot-0.6.0.tgz",
+    "sha256": "a9296298ad48342ad19fedca164e287b9509af0d650818725c2667908076f1f6",
+    "level": "default"
+  },
+  {
+    "package": "@local/dsh-codex-pilot",
+    "version": "0.4.1",
+    "file": "local-dsh-codex-pilot-0.4.1.tgz",
+    "sha256": "a84001aaee89ec28e04a26b2ee2d07a4b9f385238f958a46d4749156ef1a588d",
+    "level": "default"
+  },
+  {
+    "package": "@xdedmi/dsh-session-id",
+    "version": "1.0.0",
+    "file": "xdedmi-dsh-session-id-1.0.0.tgz",
+    "sha256": "14f480d92c2832b696cabd9faee82a6bc9e8deff58dfa19170a2465ce22284a1",
+    "level": "default"
+  }
+]

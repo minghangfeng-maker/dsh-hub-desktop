@@ -1,5 +1,7 @@
 /** Typed English and Chinese copy owned by the Electron shell. */
 
+import { brandDesktopMessages } from './branding.ts'
+
 export const en = {
   cliCommandMenu: 'Manage dsh Command…',
   cliCommandTitle: 'Manage dsh Command',
@@ -42,6 +44,11 @@ export const en = {
   quit: 'Quit',
   cancel: 'Cancel',
   quitTitle: 'Quit DeepSeek Harness?',
+  hubRestartTitle: 'Hub configuration ready',
+  hubRestartReady: 'DeepSeek Harness defaults and plugins from your Hub are ready. Restart to apply them.',
+  hubRestartActiveTasks: 'Running tasks will be interrupted by the restart.',
+  hubRestartNow: 'Restart now',
+  hubRestartLater: 'Later',
   quitActiveTasks: 'Running tasks will be interrupted.',
   quitScheduledTasks: 'Scheduled tasks will not run while the app is closed.',
   quitActiveAndScheduledTasks: 'Running tasks will be interrupted, and scheduled tasks will not run while the app is closed.',
@@ -71,8 +78,8 @@ export const en = {
   welcomeTaglineBefore: 'Welcome to ',
   welcomeTaglineBrand: 'DeepSeek Harness',
   welcomeTaglineAfter: '',
-  welcomeDescription: 'Build potential. Explore intelligence.',
-  welcomeAuthStarting: 'Opening sign in…',
+  welcomeDescription: 'Your team’s account, models, and plugins, one sign-in away.',
+  welcomeAuthStarting: 'Opening the DSH Hub sign-in page…',
   welcomeAuthWaiting: 'Browser didn’t open automatically?',
   welcomeAuthWaitingDescription: 'Copy the sign-in link and open it in your browser to sign in.',
   welcomeAuthExchanging: 'Completing sign in…',
@@ -84,10 +91,14 @@ export const en = {
   welcomeAuthCopyFailed: 'Could not copy. Try again.',
   welcomeAuthCancel: 'Cancel',
   welcomeAuthRetry: 'Sign in again',
-  welcomeSignIn: 'Sign in',
+  welcomeSignIn: 'Log in to DSH Hub',
+  welcomeOffline: 'Continue offline',
+  welcomeOfflineHint: 'Use the local workspace without an account. Sign in later from Settings → Account.',
+  // Same text in both dictionaries (design §4.1): the line names the vendor, not a translation.
+  welcomePoweredBy: 'Powered by xdedmi',
   welcomeApiKey: 'Add API Key',
   welcomeKeyTitle: 'Add an API key to get started',
-  welcomeKeyDescription: 'Configure official DeepSeek models to start using Harness',
+  welcomeKeyDescription: 'A DSH Hub account brings its own models; an API key is the offline fallback',
   welcomeKeyPlaceholder: 'Enter API key',
   welcomeKeySave: 'Save and continue',
   welcomeKeyLater: 'Set up later',
@@ -213,6 +224,11 @@ export const zh = {
   quit: '退出',
   cancel: '取消',
   quitTitle: '退出 DeepSeek Harness？',
+  hubRestartTitle: 'Hub 配置已就绪',
+  hubRestartReady: 'DeepSeek Harness 的默认配置和插件已就绪，重启后全部生效。',
+  hubRestartActiveTasks: '有任务正在运行，重启会中断它们。',
+  hubRestartNow: '立即重启',
+  hubRestartLater: '稍后',
   quitActiveTasks: '当前正在运行的任务将会中断',
   quitScheduledTasks: '应用关闭期间，定时任务不会运行',
   quitActiveAndScheduledTasks: '当前正在运行的任务将会中断，且应用关闭期间，定时任务不会运行',
@@ -242,8 +258,8 @@ export const zh = {
   welcomeTaglineBefore: '欢迎使用 ',
   welcomeTaglineBrand: 'DeepSeek Harness',
   welcomeTaglineAfter: '',
-  welcomeDescription: '组装无限可能，共探智能上限',
-  welcomeAuthStarting: '正在打开登录…',
+  welcomeDescription: '账号、模型与插件，一次登录即可用',
+  welcomeAuthStarting: '正在打开 DSH Hub 登录页…',
   welcomeAuthWaiting: '没有自动打开浏览器？',
   welcomeAuthWaitingDescription: '复制登录链接，用浏览器手动打开完成登录',
   welcomeAuthExchanging: '正在完成登录…',
@@ -255,10 +271,14 @@ export const zh = {
   welcomeAuthCopyFailed: '复制失败，请重试',
   welcomeAuthCancel: '取消',
   welcomeAuthRetry: '重新登录',
-  welcomeSignIn: '登录',
+  welcomeSignIn: '登录 DSH Hub',
+  welcomeOffline: '离线使用',
+  welcomeOfflineHint: '不登录也能使用本地工作区；之后可在 设置 → 账号 登录 Hub。',
+  // 与英文同值：这行是厂商标识，不翻译（设计 §4.1）。
+  welcomePoweredBy: 'Powered by xdedmi',
   welcomeApiKey: '添加 API Key',
   welcomeKeyTitle: '添加一个 API Key 开始使用',
-  welcomeKeyDescription: '配置 DeepSeek 官方模型，即可开始使用',
+  welcomeKeyDescription: 'DSH Hub 账号自带模型；API Key 是离线兜底',
   welcomeKeyPlaceholder: '输入 API 密钥',
   welcomeKeySave: '保存并继续',
   welcomeKeyLater: '稍后配置',
@@ -347,9 +367,10 @@ export interface DesktopLocale {
 
 /** Resolve Electron's locale to one shipped Desktop dictionary. */
 export function resolveDesktopLocale(locale: string): DesktopLocale {
+  // Hub build: one place rewrites the product name in the selected dictionary.
   return locale.toLowerCase().startsWith('zh')
-    ? { id: 'zh-CN', messages: zh }
-    : { id: 'en', messages: en }
+    ? { id: 'zh-CN', messages: brandDesktopMessages(zh) }
+    : { id: 'en', messages: brandDesktopMessages(en) }
 }
 
 /**

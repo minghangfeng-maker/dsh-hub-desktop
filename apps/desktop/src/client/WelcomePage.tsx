@@ -26,9 +26,13 @@ export function Welcome({ api }: { api: WelcomeApi }) {
   const [cancelling, setCancelling] = useState(false)
   const [copyFeedback, setCopyFeedback] = useState<{ status: 'idle' | 'busy' | 'copied' | 'failed' }>({ status: 'idle' })
   const copyState = copyFeedback.status
+  // A DSH Hub build signs in to the Hub; the official provider's key entry is an
+  // advanced alternative the account page enables, so it is absent until then.
+  const allowApiKey: boolean = api.allowApiKey
   const [draft, setDraft] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [offlineError, setOfflineError] = useState('')
   const busyRef = useRef(false)
   const mounted = useRef(true)
   const revision = useRef(0)
@@ -125,6 +129,20 @@ export function Welcome({ api }: { api: WelcomeApi }) {
       if (mounted.current) setBusy(false)
     }
   }
+  async function enterOffline() {
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    setOfflineError('')
+    try {
+      await api.enterOffline()
+    } catch {
+      if (mounted.current) setOfflineError(m.welcomeContinueFailed)
+    } finally {
+      busyRef.current = false
+      if (mounted.current) setBusy(false)
+    }
+  }
   async function start() {
     navigate('account')
     setStarting(true)
@@ -179,6 +197,13 @@ export function Welcome({ api }: { api: WelcomeApi }) {
       <div id="tagline" className="tagline" hidden={page !== 'entry'}>
         <h1 id="welcome-heading"><span>{m.welcomeTaglineBefore}</span><em>{m.welcomeTaglineBrand}</em><span>{m.welcomeTaglineAfter}</span></h1>
         <p id="welcome-description">{m.welcomeDescription}</p>
+        <div className="offline">
+          <button id="offline" className="offline-link" type="button" disabled={busy}
+            onClick={() => { void enterOffline() }}>{m.welcomeOffline}</button>
+          {offlineError === ''
+            ? <span id="offline-hint" className="offline-hint">{m.welcomeOfflineHint}</span>
+            : <span id="offline-hint" className="offline-hint" role="alert">{offlineError}</span>}
+        </div>
       </div>
       <form id="key-form" className="key-form" hidden={page !== 'key'} noValidate onSubmit={(event) => { void saveKey(event) }} aria-busy={busy}>
         <header className="key-heading"><h1 id="key-title">{m.welcomeKeyTitle}</h1><p id="key-description">{m.welcomeKeyDescription}</p></header>
@@ -203,14 +228,16 @@ export function Welcome({ api }: { api: WelcomeApi }) {
           <StateDot state="ongoing" size={16} className="welcome-loading" />
         </button>
         <button id="auth-retry" className="primary" type="button" hidden={!failed} onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'sign_in' }); void start() }}>{m.welcomeAuthRetry}</button>
-        <button id="auth-api-key" className="secondary" type="button" hidden={!failed} onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'api-key' }); navigate('key') }}>{m.welcomeApiKey}</button>
+        <button id="auth-api-key" className="secondary" type="button" hidden={!failed || !allowApiKey} onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'api-key' }); navigate('key') }}>{m.welcomeApiKey}</button>
         <button id="auth-cancel" className="secondary" type="button" hidden={failed}
           disabled={cancelling || phase === 'committing' || phase === 'succeeded' || (phase === 'initializing' && !attempt?.id)}
           onClick={() => { void cancel() }}>{m.welcomeAuthCancel}</button>
       </div>
       <div id="entry-actions" className="actions" hidden={page !== 'entry'}>
         <button id="sign-in" className="primary" type="button" onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'sign_in' }); void start() }}>{m.welcomeSignIn}</button>
-        <button ref={keyButton} id="api-key" className="secondary" type="button" onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'api-key' }); navigate('key') }}>{m.welcomeApiKey}</button>
+        {allowApiKey
+          ? <button ref={keyButton} id="api-key" className="secondary" type="button" onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'api-key' }); navigate('key') }}>{m.welcomeApiKey}</button>
+          : null}
       </div>
       <div id="key-actions" className="actions" hidden={page !== 'key'}>
         <button id="save-key" className="primary" type="submit" form="key-form" disabled={busy || draft.trim() === ''}>{m.welcomeKeySave}</button>
@@ -220,6 +247,7 @@ export function Welcome({ api }: { api: WelcomeApi }) {
           setDraft(''); setError(''); focusEntry.current = true; navigate('entry')
         }}>{m.welcomeKeyBack}</button>
       </div>
+      <footer id="powered-by" className="powered-by">{m.welcomePoweredBy}</footer>
     </main>
   </>
 }

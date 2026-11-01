@@ -83,7 +83,25 @@ body {
   grid-template-rows: 40px minmax(0, 1fr) 104px;
   justify-items: center;
   align-items: center;
-  padding: 24px 48px 76px;
+  /* The last 68 px hold the vendor line under the fixed actions; the key page's
+     "back to sign in" link keeps its own space above that line. */
+  position: relative;
+  padding: 24px 48px 68px;
+}
+
+/* Vendor attribution: 12 px, secondary colour, one line, no link (design §4.1). */
+.powered-by {
+  position: absolute;
+  right: 0;
+  bottom: 12px;
+  left: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-family: var(--dsw-font-family);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .welcome > .tagline,
@@ -116,6 +134,45 @@ body {
 .tagline p {
   margin: 0;
   font: inherit;
+}
+
+
+/* Offline entry: a text action under the entry description; the hint names the later sign-in. */
+.tagline .offline {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  margin-top: 14px;
+  font-size: 13px;
+  line-height: 20px;
+  white-space: normal;
+}
+
+.offline-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  app-region: no-drag;
+  cursor: pointer;
+}
+
+.offline-link:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.offline-link:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.offline-hint {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 16px;
 }
 
 .tagline em {
