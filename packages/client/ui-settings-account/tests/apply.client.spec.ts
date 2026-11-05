@@ -772,3 +772,32 @@ it('applies API-key defaults through the desktop slot and shared configuration o
   expect(values['ui-settings']).toEqual({ enabled: true })
   expect(values['ui-chat']).toMatchObject({ transcriptView: 'standard' })
 }, 60_000)
+
+it('offers the account section to a signed-out user when the Hub connector reports an address', async ({ start }) => {
+  // A desktop Host serves this document; a plain browser has no connector and answers 404.
+  const fetch = vi.fn(async (): Promise<Response> => ({
+    status: 200,
+    ok: true,
+    json: async () => ({
+      signedIn: false, hubOrigin: 'https://hub.example.com', hubOriginOverride: '',
+      builtHubOrigin: 'https://hub.example.com', loginPhase: null,
+    }),
+  }) as Response)
+  vi.stubGlobal('fetch', fetch)
+  const c = await start()
+  await vi.waitFor(() => {
+    expect(c.ctx.slots.entries('settings.section').some(entry => entry.options.id === 'account')).toBe(true)
+  })
+  expect(fetch).toHaveBeenCalled()
+}, 60_000)
+
+it('hides the account section while signed out on a build with no Hub connector', async ({ start }) => {
+  vi.stubGlobal('fetch', vi.fn(async (): Promise<Response> => ({ status: 404, ok: false, json: async () => ({}) }) as Response))
+  const c = await start()
+  const section = () => c.ctx.slots.entries('settings.section').find(entry => entry.options.id === 'account')
+  await c.mock.streams.opened('account/watch', 1)
+  expect(section()).toBeUndefined()
+  // Signing in brings the section back without a connector, because the account itself is the offer.
+  c.mock.streams.push('account/watch', stored)
+  await vi.waitFor(() => { expect(section()).toBeDefined() })
+}, 60_000)

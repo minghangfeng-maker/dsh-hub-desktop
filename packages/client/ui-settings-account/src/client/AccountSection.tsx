@@ -1,7 +1,7 @@
 /** Account settings renders safe Host state and explicit login actions. */
 import { Big } from 'big.js'
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
-import { Button, IconRightUpOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconRightUpOutlineRegular, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AccountDetails, AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
 import type { PropsRuntime, PropsLocale, InjectFace, HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ThemeSnapshot } from '@deepseek-ai/dsh-client-ui-theme/client'
@@ -12,6 +12,7 @@ import type { AccountAvatarSnapshot } from './account-avatar.ts'
 import { authorizeUrlWithTheme } from './authorize-url.ts'
 import type { BonusNotice } from './bonus-notices.ts'
 import type { HubChannelPhase, HubChannelSnapshot } from './hub-channel.ts'
+import type { HubOriginChangeResult, HubOriginSnapshot } from './hub-origin.ts'
 import type { AccountKey } from './locales.ts'
 import css from './AccountSection.module.css'
 
@@ -42,6 +43,8 @@ export interface AccountSnapshot {
   hubRestartPending?: boolean
   /** Phone-access switch and connection state; absent on a build with no Hub connector. */
   hubChannel?: HubChannelSnapshot | undefined
+  /** Hub address in effect and where it comes from; absent on a build with no Hub connector. */
+  hubOrigin?: HubOriginSnapshot | undefined
 }
 
 /** Host operations injected into the Cordis-free account component. */
@@ -99,6 +102,13 @@ export interface AccountSectionInjected {
    * @returns after the Host answered with the new status.
    */
   setHubChannel?: (enabled: boolean) => Promise<void>
+  /**
+   * Point this computer at another Hub, or back at the one the build carries.
+   * Absent when the build has no Hub connector.
+   * @param value - Address the user entered; an empty string restores the build-time origin.
+   * @returns What the connector answered, so the row can show a refused address.
+   */
+  changeHubOrigin?: (value: string) => Promise<HubOriginChangeResult>
 }
 /**
  * Copy for the phone channel's phase.
@@ -122,12 +132,17 @@ export type AccountSectionProps =
   PropsRuntime<'settings.section'> & PropsLocale<'settings.account'> & InjectFace<AccountSectionInjected>
 /** @param props - localized actions, account subscription, and the shared Platform page channel. @returns account settings UI. */
 export function AccountSection({
-  t, useAccount, useTheme, start, cancel, openPlatformPage, avatarFailed, restartHub, setHubChannel,
+  t, useAccount, useTheme, start, cancel, openPlatformPage, avatarFailed, restartHub, setHubChannel, changeHubOrigin,
 }: AccountSectionProps) {
   const { view: state, details, avatar, failed: streamFailed } = useAccount(value => value)
   const hubRestartPending = useAccount(value => value.hubRestartPending === true)
   const hubChannel = useAccount(value => value.hubChannel)
+  const hubOrigin = useAccount(value => value.hubOrigin)
   const [channelConsent, setChannelConsent] = useState(false)
+  const [originDraft, setOriginDraft] = useState<string | undefined>(undefined)
+  const [originConfirm, setOriginConfirm] = useState<string | undefined>(undefined)
+  const [originError, setOriginError] = useState<AccountKey | undefined>(undefined)
+  const [originBusy, setOriginBusy] = useState(false)
   const colorScheme = useTheme(snapshot => snapshot.active.colorScheme)
   // The shared host owns the native view; this page holds only its own request,
   // and only while it is the latest owner.
@@ -178,6 +193,104 @@ export function AccountSection({
     <a className={className} href={state?.links.usageUrl} aria-disabled={state === undefined}
       target="_blank" rel="noreferrer" onClick={openUsage}>{label}</a>
   )
+  /**
+   * Address the confirmation step would apply to this computer.
+   * @param value - draft the user submitted; an empty draft means the build's own origin.
+   * @returns the address the confirmation copy names.
+   */
+  const originTarget = (value: string): string => value.trim() === '' ? hubOrigin?.builtOrigin ?? '' : value.trim()
+  /**
+   * Store one address and show what the connector answered.
+   * @param value - address to store; an empty string restores the build-time origin.
+   */
+  const submitOrigin = (value: string): void => {
+    if (changeHubOrigin === undefined) return
+    setOriginBusy(true)
+    setOriginError(undefined)
+    void (async () => {
+      try {
+        const result = await changeHubOrigin(value)
+        if (result.status === 'changed') {
+          setOriginConfirm(undefined)
+          setOriginDraft(undefined)
+          return
+        }
+        setOriginError(result.status === 'invalid-origin'
+          ? 'hubOriginInvalid'
+          : result.status === 'sign-in-in-progress' ? 'hubOriginSigningIn' : 'failed')
+      } catch {
+        setOriginError('failed')
+      } finally {
+        setOriginBusy(false)
+      }
+    })()
+  }
+  /**
+   * Ask for confirmation before the address moves; restoring the default while
+   * nothing is customised, or saving the address already in effect, moves nothing
+   * and needs none.
+   * @param value - address the user submitted.
+   */
+  const requestOrigin = (value: string): void => {
+    setOriginError(undefined)
+    const typed = value.trim()
+    if ((typed === '' && hubOrigin?.override === '') || typed === hubOrigin?.origin) {
+      setOriginDraft(undefined)
+      return
+    }
+    setOriginConfirm(value)
+  }
+  const originLocked = busy || originBusy || hubOrigin?.signingIn === true
+  // The row reads the connector's document: a build without a connector never has one.
+  const originRow = hubOrigin === undefined || changeHubOrigin === undefined ? null : <>
+    <div className={css.row}>
+      <span>{t('hubOriginTitle')}</span>
+      {originDraft === undefined
+        ? <div className={css.links}>
+          <span className={css.secondary} role="status">{hubOrigin.origin}</span>
+          <Button variant="outline" disabled={originLocked} onClick={() => {
+            setOriginError(undefined)
+            setOriginConfirm(undefined)
+            setOriginDraft(hubOrigin.origin)
+          }}>{t('hubOriginChange')}</Button>
+        </div>
+        : <div className={css.links}>
+          <Input {...css.originInput === undefined ? {} : { className: css.originInput }} value={originDraft}
+            aria-label={t('hubOriginTitle')} placeholder={t('hubOriginPlaceholder')} disabled={originBusy}
+            onChange={(event) => { setOriginDraft(event.target.value) }} />
+          <Button variant="primary" disabled={originBusy} onClick={() => { requestOrigin(originDraft) }}>{t('hubOriginSave')}</Button>
+          <Button variant="outline" disabled={originBusy} onClick={() => {
+            setOriginDraft(undefined)
+            setOriginConfirm(undefined)
+            setOriginError(undefined)
+          }}>{t('cancel')}</Button>
+        </div>}
+    </div>
+    {hubOrigin.override !== '' && originDraft === undefined && originConfirm === undefined && <>
+      <div className={css.row}>
+        <span className={css.unavailable}>{t('hubOriginCustomised', { built: hubOrigin.builtOrigin })}</span>
+        <Button variant="outline" disabled={originLocked} onClick={() => {
+          setOriginError(undefined)
+          setOriginDraft(undefined)
+          setOriginConfirm('')
+        }}>{t('hubOriginRestore')}</Button>
+      </div>
+      <div className={css.row}>
+        <span className={css.unavailable}>{t('hubOriginUpdateNote')}</span>
+      </div>
+    </>}
+    {originConfirm !== undefined && <div className={css.restartCard} role="group" aria-label={t('hubOriginConfirmTitle')}>
+      <span className={css.restartCopy}>
+        {t('hubOriginConfirmTitle')} {t('hubOriginConfirmBody', { origin: originTarget(originConfirm) })}
+        {hubOrigin.signedIn ? ` ${t('hubOriginConfirmSignOut')}` : ''}
+      </span>
+      <div className={css.links}>
+        <Button variant="outline" disabled={originBusy} onClick={() => { setOriginConfirm(undefined) }}>{t('cancel')}</Button>
+        <Button variant="primary" disabled={originBusy} onClick={() => { submitOrigin(originConfirm) }}>{t('hubOriginConfirmAction')}</Button>
+      </div>
+    </div>}
+    {originError !== undefined && <p className={css.originError} role="alert">{t(originError)}</p>}
+  </>
   const status = failed || streamFailed || attempt?.phase === 'failed' ? t('failed')
     : attempt?.phase === 'expired' ? t('expired')
       : active ? t(attempt.phase === 'initializing' ? 'initializing' : attempt.phase === 'waiting-browser' ? 'waiting' : 'completing')
@@ -194,6 +307,7 @@ export function AccountSection({
         <Button variant="primary" className={css.signInButton} disabled={busy || state === undefined}
           onClick={() => { void run(start) }}>{t('signIn')}</Button>
       </div>
+      {originRow !== null && <div className={`${css.balanceCard} ${css.originCard}`}>{originRow}</div>}
       <p className={css.poweredBy}>{t('poweredBy')}</p>
     </section>
   )
@@ -259,6 +373,10 @@ export function AccountSection({
               }}>{t(hubChannel.enabled ? 'remoteAccessTurnOff' : 'remoteAccessTurnOn')}</Button>
             </div>
           </div>
+        </>}
+        {originRow !== null && <>
+          <div className={css.divider} />
+          {originRow}
         </>}
         <div className={css.divider} />
         <div className={css.row}>

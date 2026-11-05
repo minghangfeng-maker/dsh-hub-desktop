@@ -14,6 +14,16 @@
 2. agent-mode 缓存，然后是已保存的设备授权。没有授权时本次运行到此为止：设备等待登录，各个循环在 `hub-connector/signed-in` 事件上启动。
 3. 有授权时：账号相关循环、托管模型集合、一次上报、一次清单拉取 —— 即登录同步轮。它在后台依赖遍历完成之后结束，连接器把结束时间记进自己的状态文件。之后上报按 Hub 要求的间隔重复；只要 Hub 的回答点名了更新的 revision，就再拉一次清单。
 
+## Hub 地址
+
+每个 Hub 请求都发向用户在账号页填写的地址；用户没填时，发向这个构建自带的地址 —— 启动时的 `DSH_HUB_ORIGIN`，没有就用包内 `build-info.json` 记录的 `hubOrigin`。安装器不再把这个地址种进状态文件，所以新安装的构建会带动所有从未填过地址的安装。
+
+`settings.hubOriginOverride` 只保存用户填写的值（已规范化）；空值表示「跟随构建」。`loadState` 忽略改名前的 `settings.hubOrigin` 键：它存的是写下它的那个构建的地址，界面上从来改不了，因此下一次写盘就把它丢掉。
+
+`POST /hub-connector/api/settings` 接受 `{hubOrigin}`，空串表示恢复构建时的地址。换地址就是换 Hub：已保存授权时，连接器先退出登录 —— 向签发它的 Hub 吊销设备令牌、清掉中转站与 pilot 密钥 —— 之后才写入新地址，旧令牌因此绝不会发到新地址。吊销最多等 5 秒：用户要离开的那个 Hub 不能把切换卡住。传输规则拒绝的地址（一律 HTTPS，只有本机回环可用明文 HTTP）返回 `400 {error: 'invalid-origin'}`；登录尝试仍绑定在当前地址上时返回 `409 {error: 'sign-in-in-progress'}`。填的正好是构建自己的地址时存空覆盖值；有效地址没变的改动不退出登录。
+
+`GET /hub-connector/api/state` 报告生效地址（`hubOrigin`）、已存的覆盖值（`hubOriginOverride`）和构建自带地址（`builtHubOrigin`）；账号卡片的 Hub 地址一行渲染这三者。
+
 ## Hub 模型路由
 
 Hub 的模型配置从不进入 `cordis.hub.patch.yml`。它是一个托管的 provider 集合：下发的 `llm-pi-ai` 与 `agent-default-model` 片段被抽出来，持久化成 `state.json` 里的 `managedModels`，再通过适配器的 `llmPiAiManaged` 服务注册。overlay 的优先级高于 profile patch，所以放在那里的模型行会让每一次个人 provider 修改看起来都被覆盖；把路由注册进适配器之后，Hub 模型和用户自己的路由并存，只有用户那一段由 Models 页面写入。

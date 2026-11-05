@@ -41,7 +41,7 @@ import { ChannelLifecycle } from './channel/lifecycle.ts'
 import { createWebSocketTransport } from './channel/transport.ts'
 import { HubConnector } from './connector.ts'
 import type { ConnectorHost, PluginManagerAccess } from './connector.ts'
-import { osLabel, osMajor, readAppVersion, type AppChannel } from './device.ts'
+import { osLabel, osMajor, readAppVersion, readBuildHubOrigin, type AppChannel } from './device.ts'
 import { info, warn } from './log.ts'
 import { finishUpstreamOnboarding } from './onboarding.ts'
 import { registerClientRoutes } from './routes.ts'
@@ -108,23 +108,6 @@ function readChannel(directory: string): AppChannel {
 }
 
 /**
- * Read the Hub origin the installer baked in.
- * @param directory - Directory holding an optional `build-info.json`.
- * @returns The recorded origin, or ''.
- */
-function readBuiltOrigin(directory: string): string {
-  try {
-    const value: unknown = JSON.parse(readFileSync(join(directory, 'build-info.json'), 'utf8'))
-    const origin = (value as { hubOrigin?: unknown }).hubOrigin
-    if (typeof origin === 'string') return origin
-  } catch {
-    // No build info is normal for a source checkout.
-  }
-  const environment = (process.env.DSH_HUB_ORIGIN ?? '').trim()
-  return environment
-}
-
-/**
  * Register the connector and every service it provides.
  * @param ctx - Host plugin context.
  * @param config - Bundle configuration resolved by the Loader.
@@ -137,9 +120,7 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
     return
   }
   const major = osMajor(platform(), release())
-  const builtOrigin = (process.env.DSH_HUB_ORIGIN ?? '').trim() !== ''
-    ? (process.env.DSH_HUB_ORIGIN ?? '').trim()
-    : readBuiltOrigin(MODULE_DIRECTORY)
+  const builtOrigin = readBuildHubOrigin(MODULE_DIRECTORY, process.env)
   const build = {
     appVersion: readAppVersion(profileContext.installAnchor),
     appChannel: readChannel(MODULE_DIRECTORY),

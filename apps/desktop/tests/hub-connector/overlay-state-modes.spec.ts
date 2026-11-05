@@ -140,7 +140,7 @@ describe('overlay rendering', () => {
 describe('connector state', () => {
   it('round-trips through disk and repairs a foreign version', () => {
     const directory = profile()
-    const state = initialState({ osLabel: 'Windows 11', hubOrigin: 'https://hub.example', installId: '0f0e0d0c-0b0a-4908-8706-050403020100' })
+    const state = initialState({ osLabel: 'Windows 11', installId: '0f0e0d0c-0b0a-4908-8706-050403020100' })
     expect(state.settings.deviceName).toBe(defaultDeviceName('Windows 11'))
     saveState(directory, { ...state, deviceId: 'dv_0123456789abcdef0123456789abcdef', appliedRevision: 3 })
     const loaded = loadState(directory, state)
@@ -197,7 +197,7 @@ describe('hubAgentModes', () => {
       credentials: store as unknown as CredentialProvider,
       registerRoute: () => () => undefined,
       hubOrigin: () => 'https://hub.example',
-      readState: () => initialState({ osLabel: 'Windows 11', hubOrigin: '', installId: 'x' }),
+      readState: () => initialState({ osLabel: 'Windows 11', installId: 'x' }),
       writeState: () => undefined,
       emit: () => undefined,
       changed: () => undefined,

@@ -198,7 +198,7 @@ function hostFor(hub: FakeHub, credentials: MemoryCredentials): {
       schemaVersion: 1,
       deviceId: null,
       installId: '0f0e0d0c-0b0a-4908-8706-050403020100',
-      settings: { hubOrigin: hub.origin, deviceName: 'WS', deepSeekLogin: false },
+      settings: { hubOriginOverride: '', deviceName: 'WS', deepSeekLogin: false },
       managed: [],
       managedModels: null,
       pendingRemovals: [],

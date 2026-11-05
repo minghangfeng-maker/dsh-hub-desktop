@@ -57,6 +57,17 @@ const RENEW_BEFORE_MS = 7 * 24 * 60 * 60 * 1000
 /** Session poll interval while signed in. */
 const SESSION_POLL_MS = 60 * 1000
 
+/**
+ * How long a sign-out waits for the Hub to acknowledge the revocation.
+ *
+ * Revocation is best effort and the local grant is already gone by then; a switch
+ * of Hub origin must not stall on a Hub the user is leaving behind.
+ */
+const REVOKE_TIMEOUT_MS = 5000
+
+/** Attempt phases that mean a login is still in flight. */
+const ACTIVE_ATTEMPT_PHASES: readonly SignInAttemptView['phase'][] = ['initializing', 'waiting-browser', 'exchanging', 'committing']
+
 
 /** Account links the client renders; the Hub's own pages. */
 export interface AccountLinks {
@@ -302,7 +313,7 @@ export class HubAccount {
    */
   async startSignIn(_client: unknown, callbackOrigin: string, _loginSource: 'web' | 'desktop'): Promise<HubAccountView> {
     const running = this.attempt
-    if (running !== undefined && ['initializing', 'waiting-browser', 'exchanging', 'committing'].includes(running.view.phase)) {
+    if (running !== undefined && ACTIVE_ATTEMPT_PHASES.includes(running.view.phase)) {
       return this.getState()
     }
     if (running !== undefined) await running.done
@@ -347,6 +358,18 @@ export class HubAccount {
   }
 
   /**
+   * Whether a login attempt is still in flight.
+   *
+   * An attempt names the Hub origin it started against, so a caller that is about
+   * to change that origin must ask this first.
+   * @returns True while the attempt is initializing, waiting for the browser, exchanging, or committing.
+   */
+  isSigningIn(): boolean {
+    const phase = this.attempt?.view.phase
+    return phase !== undefined && ACTIVE_ATTEMPT_PHASES.includes(phase)
+  }
+
+  /**
    * Remove the local grant and revoke the device token at the Hub.
    * @param _client - Requesting UI identity; unused.
    * @returns The signed-out snapshot.
@@ -367,7 +390,13 @@ export class HubAccount {
     if (grant !== undefined) {
       // Revocation is best effort: the local grant is already gone, which is what the user asked for.
       try {
-        await hubRequest({ url: `${grant.hubOrigin}/api/desktop/auth/logout`, method: 'POST', token: grant.token, body: {} })
+        await hubRequest({
+          url: `${grant.hubOrigin}/api/desktop/auth/logout`,
+          method: 'POST',
+          token: grant.token,
+          body: {},
+          timeoutMs: REVOKE_TIMEOUT_MS,
+        })
         info('signed out; the Hub revoked this device token')
       } catch (error) {
         warn(`signed out locally; the Hub could not be told (${error instanceof HubRequestError ? error.code : 'network'})`)

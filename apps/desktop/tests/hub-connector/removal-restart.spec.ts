@@ -43,7 +43,7 @@ it('finishes a pending removal after a restart even when the manifest and its ET
   const address = server.address()
   if (address === null || typeof address === 'string') throw new Error('missing server address')
   const origin = `http://127.0.0.1:${String(address.port)}`
-  const fallback = initialState({ osLabel: 'Windows 11', hubOrigin: origin, installId: 'install-1' })
+  const fallback = initialState({ osLabel: 'Windows 11', installId: 'install-1' })
   saveState(profile, {
     ...fallback,
     deviceId: 'dv_0123456789abcdef0123456789abcdef',

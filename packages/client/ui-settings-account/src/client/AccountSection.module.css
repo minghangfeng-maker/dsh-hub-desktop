@@ -243,3 +243,21 @@
   min-width: 0;
   color: var(--dsw-alias-label-secondary);
 }
+
+/* Hub address row: a full-width card on the signed-out surface, an inline editor, and
+   the connector's refusal. */
+.originCard {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.originInput {
+  width: 260px;
+}
+
+.originError {
+  margin: 0;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+}

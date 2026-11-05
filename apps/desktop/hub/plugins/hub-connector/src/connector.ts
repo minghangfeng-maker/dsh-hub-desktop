@@ -89,12 +89,31 @@ export interface PluginManagerAccess {
  */
 export type RestartNotice = PendingRestart
 
+/**
+ * A refused Hub-origin change.
+ *
+ * The settings route maps `invalid-origin` to 400 and `sign-in-in-progress` to 409,
+ * so the account page can tell a bad address from an attempt that must finish first.
+ */
+export class HubOriginChangeError extends Error {
+  /**
+   * @param code - Why the change was refused.
+   * @param message - Operator-facing text; the page shows its own localized copy.
+   */
+  constructor(readonly code: 'invalid-origin' | 'sign-in-in-progress', message: string) {
+    super(`${code}: ${message}`)
+    this.name = 'HubOriginChangeError'
+  }
+}
+
 /** Everything one status read returns to the account page. */
 export interface ConnectorStatus {
   /** Whether a device token is stored. */
   readonly signedIn: boolean
   /** Hub origin in effect. */
   readonly hubOrigin: string
+  /** Origin the user entered, or '' while this install follows the build-time origin. */
+  readonly hubOriginOverride: string
   /** Build-baked origin, so the page can offer a reset. */
   readonly builtHubOrigin: string
   /** Account facts, when signed in. */
@@ -247,7 +266,6 @@ export class HubConnector {
   ) {
     const fallback = initialState({
       osLabel: host.build.osLabel,
-      hubOrigin: host.build.builtHubOrigin,
       installId: host.build.installId,
     })
     this.state = loadState(host.profile, fallback)
@@ -417,14 +435,75 @@ export class HubConnector {
 
   /** @returns The Hub origin in effect, or '' when none is configured. */
   origin(): string {
-    const configured = this.state.settings.hubOrigin.trim() !== '' ? this.state.settings.hubOrigin : this.host.build.builtHubOrigin
-    if (configured.trim() === '') return ''
+    const override = this.state.settings.hubOriginOverride.trim()
+    if (override === '') return this.builtOrigin()
     try {
-      return normalizeHubOrigin(configured)
+      return normalizeHubOrigin(override)
     } catch {
-      warn(`the configured Hub origin ${JSON.stringify(configured)} is unusable`)
+      warn(`the configured Hub origin ${JSON.stringify(override)} is unusable`)
       return ''
     }
+  }
+
+  /** @returns The origin this build carries, normalized, or '' when it carries none. */
+  private builtOrigin(): string {
+    const built = this.host.build.builtHubOrigin.trim()
+    if (built === '') return ''
+    try {
+      return normalizeHubOrigin(built)
+    } catch {
+      warn(`the built Hub origin ${JSON.stringify(built)} is unusable`)
+      return ''
+    }
+  }
+
+  /**
+   * Point this install at another Hub, or back at the one the build carries.
+   *
+   * The device token, the relay key, and the phone-access binding belong to the Hub
+   * that issued them, so a real move signs out first: `readGrant` compares the stored
+   * grant's origin with the configured one, and writing the new address first would
+   * leave the old token unrevoked at the Hub it came from.
+   * @param value - User-entered origin; an empty string restores the build-time origin.
+   * @returns after the new origin is stored and, when the origin moved, the old account is gone.
+   * @throws {HubOriginChangeError} `invalid-origin` for a value the transport rules refuse, or
+   * `sign-in-in-progress` while a login attempt is still bound to the current origin.
+   */
+  async changeHubOrigin(value: string): Promise<void> {
+    const trimmed = value.trim()
+    let override = ''
+    if (trimmed !== '') {
+      let normalized: string
+      try {
+        normalized = normalizeHubOrigin(trimmed)
+      } catch (error) {
+        throw new HubOriginChangeError(
+          'invalid-origin',
+          error instanceof Error ? error.message : String(error),
+        )
+      }
+      // A typed address equal to the build's own is the same as following the build,
+      // so the override stays empty and a future rebuild moves this install with it.
+      override = normalized === this.builtOrigin() ? '' : normalized
+    }
+    const next = override === '' ? this.builtOrigin() : override
+    if (next === this.origin()) {
+      // The effective address does not move, so the stored account stays valid.
+      this.persistSettings({ hubOriginOverride: override })
+      return
+    }
+    if (this.account.isSigningIn()) {
+      throw new HubOriginChangeError('sign-in-in-progress', 'a sign-in is still using the current Hub origin')
+    }
+    const grant = await this.syncGrant()
+    if (grant !== undefined) {
+      await this.account.signOut(undefined)
+      // The signed-out event drops the connector's derived state in the Host
+      // composition; reading the grant again also covers compositions without it.
+      await this.syncGrant()
+    }
+    this.persistSettings({ hubOriginOverride: override })
+    info(`the Hub origin is now ${next === '' ? 'unset' : next}${grant === undefined ? '' : ' (signed out first)'}`)
   }
 
   /** @returns The cached grant, if any (synchronous view for the status surface). */
@@ -450,25 +529,35 @@ export class HubConnector {
 
   /**
    * Apply a settings change and write it to disk.
-   * @param patch - Settings members to replace.
+   *
+   * The Hub origin is not part of this patch: it can end the account session, which
+   * is {@link changeHubOrigin}'s decision.
+   * @param patch - Device name and advanced account switch to replace.
    */
-  saveSettings(patch: Partial<HubSettings>): void {
+  saveSettings(patch: Partial<Pick<HubSettings, 'deviceName' | 'deepSeekLogin'>>): void {
     const deepSeekChanged = patch.deepSeekLogin !== undefined && patch.deepSeekLogin !== this.state.settings.deepSeekLogin
     this.persist({
       ...this.state,
       settings: {
-        hubOrigin: patch.hubOrigin ?? this.state.settings.hubOrigin,
+        hubOriginOverride: this.state.settings.hubOriginOverride,
         deviceName: patch.deviceName ?? this.state.settings.deviceName,
         deepSeekLogin: patch.deepSeekLogin ?? this.state.settings.deepSeekLogin,
       },
     })
-    if (patch.hubOrigin !== undefined) void this.syncGrant().then(() => { this.notify() })
     if (deepSeekChanged) {
       // The switch owns the search rows in official-account mode; hand them back when it
       // is off again without waiting for the next session poll.
       this.searchFragments = searchFragments(this.searchTools, { officialAccount: this.state.settings.deepSeekLogin })
       this.rewriteOverlay('deepseek-account-switch')
     }
+  }
+
+  /**
+   * Replace the Hub origin override in the durable state.
+   * @param settings - The override to store; every other setting keeps its current value.
+   */
+  private persistSettings(settings: Pick<HubSettings, 'hubOriginOverride'>): void {
+    this.persist({ ...this.state, settings: { ...this.state.settings, ...settings } })
   }
 
   /**
@@ -563,6 +652,7 @@ export class HubConnector {
     return {
       signedIn: grant !== undefined,
       hubOrigin: this.origin(),
+      hubOriginOverride: this.state.settings.hubOriginOverride,
       builtHubOrigin: this.host.build.builtHubOrigin,
       user: grant?.user ?? null,
       wallet: grant?.wallet ?? null,

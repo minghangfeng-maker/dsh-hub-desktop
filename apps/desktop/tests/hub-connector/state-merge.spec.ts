@@ -3,7 +3,7 @@ import { initialState, mergeApplyRecord, type HubState } from '../../hub/plugins
 
 /** Fresh state for one profile. */
 function base(): HubState {
-  return initialState({ osLabel: 'Windows 11', hubOrigin: 'http://127.0.0.1:7976', installId: 'install-1' })
+  return initialState({ osLabel: 'Windows 11', installId: 'install-1' })
 }
 
 /** State after applying revision 1 with one delivered plugin. */

@@ -33,6 +33,7 @@ import { refreshAfterReturn } from './account-refresh.ts'
 import { AccountAvatarLoader } from './account-avatar.ts'
 import { HubRestartWatcher } from './hub-restart.ts'
 import { HubChannelWatcher } from './hub-channel.ts'
+import { HubOriginWatcher } from './hub-origin.ts'
 export type { AccountSectionInjected, AccountSectionProps } from './AccountSection.tsx'
 export type { AccountMenuProps } from './AccountMenu.tsx'
 export type { AccountSnapshot } from './AccountSection.tsx'
@@ -53,7 +54,7 @@ export function apply(ctx: Context): void {
   const config = ContactConfig(page[CONTACT_CONFIG_GLOBAL] ?? {})
   let snapshot: AccountSnapshot = {
     view: undefined, details: undefined, avatar: undefined, failed: false, loginVisible: false, desktopOnboardingVisible: desktop,
-    hubRestartPending: false, hubChannel: undefined,
+    hubRestartPending: false, hubChannel: undefined, hubOrigin: undefined,
   }
   // Desktop main opens the authorization page natively; a plain browser opens it in a tab it owns.
   const browser = new BrowserLogin(url => authorizeUrlWithTheme(url, ctx.theme.getTheme().active.colorScheme))
@@ -75,6 +76,11 @@ export function apply(ctx: Context): void {
     : undefined
   ctx.effect(() => () => { hubChannel?.dispose() }, 'account: phone channel')
   hubChannel?.start()
+  // The address a Hub build talks to; a plain browser answers 404 and the row disappears
+  // instead of polling a route that cannot exist there.
+  const hubOrigin = new HubOriginWatcher((origin) => { publish({ ...snapshot, hubOrigin: origin }) })
+  ctx.effect(() => () => { hubOrigin.dispose() }, 'account: Hub address')
+  hubOrigin.start()
   const avatar = new AccountAvatarLoader((value) => { publish({ ...snapshot, avatar: value }) })
   ctx.effect(() => () => { avatar.dispose() }, 'account: profile picture lifetime')
   /** @returns the client identity for one account call, read at call time so it carries the language and zone in effect then. */
@@ -278,6 +284,9 @@ export function apply(ctx: Context): void {
         await hubChannel.setEnabled(enabled)
       },
     },
+    async changeHubOrigin(value: string) {
+      return await hubOrigin.change(value)
+    },
   }
   if (desktop) {
     const controller = new DesktopOnboardingController(
@@ -340,7 +349,9 @@ export function apply(ctx: Context): void {
   ctx.slots.inject('settings.section', () => {
     let unregister: (() => void) | undefined
     const update = () => {
-      if (snapshot.view?.status === 'credential-stored') {
+      // A signed-out user still has Hub address to read and change, so the section
+      // appears whenever the card has something to offer.
+      if (snapshot.view?.status === 'credential-stored' || snapshot.hubOrigin !== undefined) {
         unregister ??= ctx.slots.register({
           name: 'settings.section', id: 'account', order: -10, label: () => t('nav'),
           locale: 'settings.account', inject: () => operations,

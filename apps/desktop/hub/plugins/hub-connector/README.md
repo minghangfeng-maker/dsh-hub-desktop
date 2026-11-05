@@ -23,6 +23,35 @@ delivered by the Hub and never uninstalled by it.
    on the interval the Hub asks for; the manifest is pulled again whenever the Hub's
    answer names a newer revision.
 
+## Hub address
+
+Every Hub request goes to the address the user entered on the account page, or —
+while they entered nothing — to the address this build carries: `DSH_HUB_ORIGIN`
+at launch, otherwise the `hubOrigin` recorded in the package's `build-info.json`.
+The installer no longer seeds the state file with that address, so a newly
+installed build moves every install whose user never typed one.
+
+`settings.hubOriginOverride` holds only what the user typed, normalized; an empty
+value means "follow the build". `loadState` ignores the pre-rename
+`settings.hubOrigin` key: it held the origin of the build that wrote it, which no
+user could edit through the UI, so the next write drops it.
+
+`POST /hub-connector/api/settings` accepts `{hubOrigin}`, where an empty string
+restores the build-time origin. A change of address is a change of Hub: with a
+stored grant the connector signs out first — revoking the device token at the Hub
+that issued it and clearing the relay and pilot keys — and stores the new address
+only after that, so the old token can never reach the new origin. Revocation is
+bounded to five seconds, because a Hub the user is leaving must not stall the
+switch. The route answers `400 {error: 'invalid-origin'}` for an address the
+transport rules reject (HTTPS anywhere, plain HTTP on loopback only) and `409
+{error: 'sign-in-in-progress'}` while a sign-in attempt is still bound to the
+current origin. Typing the build's own address stores the empty override, and a
+change that leaves the effective address alone does not sign out.
+
+`GET /hub-connector/api/state` reports the effective address (`hubOrigin`), the
+stored override (`hubOriginOverride`), and the build's own address
+(`builtHubOrigin`); the account card's Hub address row renders all three.
+
 ## Hub model routes
 
 The Hub's model configuration never enters `cordis.hub.patch.yml`. It is a managed

@@ -223,7 +223,7 @@ export interface Fixture {
 export async function withFixture(body: (fixture: Fixture) => Promise<void>, options: FixtureOptions = {}): Promise<void> {
   const profile = mkdtempSync(join(tmpdir(), 'hub-restart-notice-'))
   const hub = await startHub(options.manifest)
-  const fallback = initialState({ osLabel: 'Windows 11', hubOrigin: hub.origin, installId: 'install-1' })
+  const fallback = initialState({ osLabel: 'Windows 11', installId: 'install-1' })
   saveState(profile, { ...fallback, deviceId: 'dv_0123456789abcdef0123456789abcdef' })
   // The shell seeds the overlay before the Host starts (design §4.2), so the first
   // delivered fragment always changes an existing file.

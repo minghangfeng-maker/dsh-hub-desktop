@@ -8,6 +8,9 @@
 /dsh-hub-hub-connector/startup-order:
   en: 4758faafb36eb2ce
   zh: 0a2e06c478598f13
+/dsh-hub-hub-connector/hub-address:
+  en: f4df727360e146b0
+  zh: 07c10cc1b136443f
 /dsh-hub-hub-connector/hub-model-routes:
   en: 1d34fa73eb669fba
   zh: 0b0c3af41657c99f

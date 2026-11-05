@@ -133,7 +133,7 @@ function rig(options: {
   readonly toggles?: string[]
 }): Rig {
   const profile = mkdtempSync(join(tmpdir(), 'hub-bundled-hub-'))
-  const fallback = initialState({ osLabel: 'Windows 11', hubOrigin: options.lab.origin, installId: 'install-1' })
+  const fallback = initialState({ osLabel: 'Windows 11', installId: 'install-1' })
   saveState(profile, {
     ...fallback,
     deviceId: 'dv_0123456789abcdef0123456789abcdef',

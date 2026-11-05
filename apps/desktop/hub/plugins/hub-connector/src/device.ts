@@ -80,6 +80,30 @@ export function readAppVersion(installAnchor: string | undefined): string {
 }
 
 /**
+ * Read the Hub origin this build carries, with the documented precedence.
+ *
+ * A launch-time `DSH_HUB_ORIGIN` outranks the installer's `build-info.json`, so a
+ * desktop run from a source tree can point at any Hub without rebuilding. A user's
+ * own entry on the account page is not part of this decision; the connector applies
+ * it in front of this value.
+ * @param directory - Directory holding the optional `build-info.json`.
+ * @param environment - Process environment the Host launched with.
+ * @returns The origin to use, or '' when this build carries none.
+ */
+export function readBuildHubOrigin(directory: string, environment: NodeJS.ProcessEnv): string {
+  const configured = (environment.DSH_HUB_ORIGIN ?? '').trim()
+  if (configured !== '') return configured
+  try {
+    const value: unknown = JSON.parse(readFileSync(join(directory, 'build-info.json'), 'utf8'))
+    const origin = (value as { hubOrigin?: unknown }).hubOrigin
+    if (typeof origin === 'string') return origin.trim()
+  } catch {
+    // No build info is normal for a source checkout.
+  }
+  return ''
+}
+
+/**
  * Reduce an operating-system release to the major version the Hub stores.
  * @param name - `process.platform` value.
  * @param kernelRelease - `os.release()`; Windows reports the NT build, macOS the Darwin kernel.

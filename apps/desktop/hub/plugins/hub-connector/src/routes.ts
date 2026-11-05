@@ -20,6 +20,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ChannelController } from './channel/controller.ts'
+import { HubOriginChangeError } from './connector.ts'
 import type { HubConnector } from './connector.ts'
 import { warn } from './log.ts'
 
@@ -108,15 +109,26 @@ export function registerClientRoutes(ctx: Context, connector: HubConnector, chan
     try {
       const body = await readJson(request)
       const value = typeof body === 'object' && body !== null ? body as Record<string, unknown> : {}
-      const patch: { hubOrigin?: string; deviceName?: string; deepSeekLogin?: boolean } = {}
+      // Every member is read before anything is written, so a request that carries a
+      // bad address and a device name applies neither.
       const origin = optionalText(value.hubOrigin, 'hubOrigin')
       const deviceName = optionalText(value.deviceName, 'deviceName')
-      if (origin !== undefined) patch.hubOrigin = origin
-      if (deviceName !== undefined) patch.deviceName = deviceName
-      if (typeof value.deepSeekLogin === 'boolean') patch.deepSeekLogin = value.deepSeekLogin
-      connector.saveSettings(patch)
+      const deepSeekLogin = typeof value.deepSeekLogin === 'boolean' ? value.deepSeekLogin : undefined
+      if (origin !== undefined) await connector.changeHubOrigin(origin)
+      connector.saveSettings({
+        ...deviceName === undefined ? {} : { deviceName },
+        ...deepSeekLogin === undefined ? {} : { deepSeekLogin },
+      })
       json(response, 200, await connector.status())
     } catch (error) {
+      if (error instanceof HubOriginChangeError) {
+        if (error.code === 'sign-in-in-progress') {
+          json(response, 409, { error: error.code })
+          return
+        }
+        json(response, 400, { error: error.code, message: error.message })
+        return
+      }
       json(response, 400, { error: error instanceof Error ? error.message : String(error) })
     }
   })

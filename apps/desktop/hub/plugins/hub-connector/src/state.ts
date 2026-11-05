@@ -36,8 +36,12 @@ export interface ManagedPluginRecord {
 
 /** Settings the user can change from the account page. */
 export interface HubSettings {
-  /** Hub origin override; empty means "use the build-time origin". */
-  readonly hubOrigin: string
+  /**
+   * Hub origin the user entered on the account page, normalized; empty means
+   * "follow the build-time origin". The build never seeds this field: a seeded
+   * value would outrank the origin a later installation of the same app bakes in.
+   */
+  readonly hubOriginOverride: string
   /** User-visible device name sent with every report. */
   readonly deviceName: string
   /** Whether the DeepSeek official account entry is offered under Advanced. Reports as diagnostics only. */
@@ -181,15 +185,15 @@ export function defaultDeviceName(osLabel: string): string {
 
 /**
  * Build the initial state for a profile that has never run the connector.
- * @param options - Machine label and the optional Hub origin the build baked in.
- * @returns Fresh state with no device identity.
+ * @param options - Machine label and the per-install identifier.
+ * @returns Fresh state with no device identity and no Hub origin override.
  */
-export function initialState(options: { readonly osLabel: string; readonly hubOrigin: string; readonly installId: string }): HubState {
+export function initialState(options: { readonly osLabel: string; readonly installId: string }): HubState {
   return {
     schemaVersion: STATE_VERSION,
     deviceId: null,
     installId: options.installId,
-    settings: { hubOrigin: options.hubOrigin, deviceName: defaultDeviceName(options.osLabel), deepSeekLogin: false },
+    settings: { hubOriginOverride: '', deviceName: defaultDeviceName(options.osLabel), deepSeekLogin: false },
     managed: [],
     managedModels: null,
     pendingRemovals: [],
@@ -225,7 +229,10 @@ export function loadState(profile: string, fallback: HubState): HubState {
     deviceId: text(raw.deviceId) ?? null,
     installId: text(raw.installId) ?? fallback.installId,
     settings: {
-      hubOrigin: text(settings?.hubOrigin) ?? fallback.settings.hubOrigin,
+      // `settings.hubOrigin` from earlier builds held the origin that build baked in,
+      // which no user could edit; reading it would pin this install to that Hub. It is
+      // deliberately not migrated, and the next write drops it.
+      hubOriginOverride: text(settings?.hubOriginOverride) ?? fallback.settings.hubOriginOverride,
       deviceName: text(settings?.deviceName) ?? fallback.settings.deviceName,
       deepSeekLogin: flag(settings?.deepSeekLogin, fallback.settings.deepSeekLogin),
     },
